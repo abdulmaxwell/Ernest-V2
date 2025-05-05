@@ -97,8 +97,7 @@ const startBot = async () => {
             syncFullHistory: false,
             getMessage: async () => undefined,
             printQRInTerminal: false,
-            shouldSyncHistoryMessage: () => false,
-            shouldIgnoreJid: jid => jid.endsWith('@g.us')
+            shouldSyncHistoryMessage: () => false
         });
 
         // Attach message handler
@@ -110,30 +109,38 @@ const startBot = async () => {
                 if (!msg.message || msg.key.fromMe) continue;
 
                 const senderId = msg.key.participant || msg.key.remoteJid;
+                const chatId = msg.key.remoteJid;
 
-                // Auto view statuses
+                // Auto view statuses and notify sender
                 if (msg.message?.protocolMessage?.key?.remoteJid?.endsWith('status@broadcast')) {
                     try {
                         await sock.readMessages([msg.key]);
                         logger.info(`📢 Viewed status from: ${msg.key.remoteJid}`);
+                        
+                        // Send stylish notification to status poster
+                        const statusPoster = msg.key.remoteJid.replace('status@broadcast', '@s.whatsapp.net');
+                        await sock.sendMessage(statusPoster, {
+                            text: `╔══════════════════════╗\n║   STATUS VIEWED ✅   ║\n╠══════════════════════╣\n║ Your status update   ║\n║ has been viewed by   ║\n║ ernestV1 bot!        ║\n╚══════════════════════╝`
+                        });
                     } catch (err) {
                         logger.error('Error viewing status:', err);
                     }
                     continue;
                 }
 
+                // Skip group messages for AFK logic
+                if (chatId.endsWith('@g.us')) continue;
+
                 // AFK logic
                 if (afkUsers.has(senderId)) {
                     const { reason, time } = afkUsers.get(senderId);
                     const seconds = Math.floor((Date.now() - time) / 1000);
-                    await sock.sendMessage(msg.key.remoteJid, {
-                        text: `🙅 This user is AFK: *${reason}* (${seconds}s ago)`
+                    await sock.sendMessage(chatId, {
+                        text: `╔══════════════════════╗\n║      AFK NOTICE      ║\n╠══════════════════════╣\n║ User is AFK:         ║\n║ ${reason}            ║\n║ (${seconds}s ago)    ║\n╚══════════════════════╝`
                     }, { quoted: msg });
                 } else {
-                    // Optional: clear AFK when user sends a message
-                    if (!senderId.endsWith('status@broadcast')) {
-                        afkUsers.delete(senderId);
-                    }
+                    // Clear AFK when user sends a message
+                    afkUsers.delete(senderId);
                 }
             }
         });
@@ -163,7 +170,9 @@ const startBot = async () => {
                 const user = sock.user;
                 logger.info(`✅ Connected as ${user?.id || 'unknown'}`);
                 try {
-                    await sock.sendMessage(user.id, { text: '🤖 *Bot Connected!* — ernestV1 is online via session auth.' });
+                    await sock.sendMessage(user.id, { 
+                        text: `╔══════════════════════╗\n║   BOT CONNECTED 🌟   ║\n╠══════════════════════╣\n║ ernestV1 is now      ║\n║ online and ready to  ║\n║ serve!               ║\n║                      ║\n║ Version: 2.0         ║\n║ Mode: Session Auth   ║\n╚══════════════════════╝`
+                    });
                 } catch (err) {
                     logger.error('❌ Could not send connected message:', err.message);
                 }
