@@ -1,22 +1,39 @@
+import { commandMap } from '../lib/commandHandler.js';
+import { ownerNumber } from '../config.js';
+
 export default async function menu(sock, msg, from) {
     try {
-        const prefix = process.env.PREFIX || '!';
-        let menuText = `
-╔════════════════════════════════╗
-║          📜 BOT MENU           ║
-╠════════════════════════════════╣\n`;
+        const prefix = process.env.PREFIX || '.';
 
-        for (const [cmd, desc] of Object.entries(commandDescriptions)) {
-            menuText += `║ ${prefix}${cmd.padEnd(15)} ${desc.padEnd(20)} ║\n`;
+        // Group commands by category
+        const categorized = {};
+        for (const [cmd, { description = '', category = 'General' }] of Object.entries(commandMap)) {
+            if (!categorized[category]) categorized[category] = [];
+            categorized[category].push({ cmd, description });
         }
 
-        menuText += `╚════════════════════════════════╝\n\n`;
-        menuText += `📝 _Type ${prefix}help <command> for more info_`;
+        let menuText = `╭━〔 *🤖 ERNEST BOT MENU* 〕━⬣\n`;
+        menuText += `┃ 🧠 Bot Owner: wa.me/${ownerNumber}\n`;
+        menuText += `┃ ⚙️ Prefix: *${prefix}*\n`;
+        menuText += `┃ 🧾 Commands: ${Object.keys(commandMap).length}\n`;
+        menuText += `╰━━━━━━━━━━━━━━━━━━━━━━⬣\n\n`;
+
+        for (const [category, cmds] of Object.entries(categorized)) {
+            menuText += `╭───「 *📂 ${category.toUpperCase()}* 」───⬣\n`;
+            for (const { cmd, description } of cmds) {
+                const label = `${prefix}${cmd}`.padEnd(15);
+                menuText += `│ 🧩 *${label}* ┇ _${description}_\n`;
+            }
+            menuText += `╰────────────────────────⬣\n\n`;
+        }
+
+        menuText += `*💡 TIP:* _Type ${prefix}help <command> for details._\n`;
+        menuText += `🚀 _Made with ❤️ by Ernest Tech House_`;
 
         await sock.sendMessage(from, { text: menuText }, { quoted: msg });
     } catch (error) {
         console.error('Error in menu:', error);
-        await sock.sendMessage(from, { text: '❌ Failed to load menu' }, { quoted: msg });
+        await sock.sendMessage(from, { text: '❌ Failed to load menu. Try again later.' }, { quoted: msg });
     }
 }
 

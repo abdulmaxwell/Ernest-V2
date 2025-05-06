@@ -1,29 +1,33 @@
 export default async function creator(sock, msg, from) {
     try {
         const creatorBox = `
-╔════════════════════════════╗
-║        👨‍💻 CREATOR         ║
-╠════════════════════════════╣
-║ • Name: Ernest Maloba      ║
-║ • Skills: Full-Stack Dev   ║
-║ • Languages: JS/Python     ║
-║ • Projects: 50+            ║
-║ • Contact: ernest@dev.com  ║
-║ • Philosophy: Code=Art     ║
-╚════════════════════════════╝
+╔══════════════════════════════════════╗
+║           👑 CREATOR PROFILE          ║
+╠══════════════════════════════════════╣
+║ • Name: Peace Ernest                 ║
+║ • Title: Founder, Ernest Tech House  ║
+║ • Role: Full-Stack Dev, Visionary 🧠  ║
+║ • Languages: JS, Python, Bash, more  ║
+║ • Projects: 50+ (bots, games, tools) ║
+║ • Skills: AI, Web Dev, Automation 🤖 ║
+║ • Motto: "Build loud. Move smart."   ║
+║ • Contact: peace@dev.com             ║
+║ • YouTube: Ernest Tech House 📺      ║
+║ • Future: Ernest OS, ErnestNet 💻     ║
+╚══════════════════════════════════════╝
 `.trim();
 
-        await sock.sendMessage(from, { 
+        await sock.sendMessage(from, {
             text: creatorBox,
             quoted: msg
         });
     } catch (error) {
         console.error('Error in creator:', error);
-        await sock.sendMessage(from, { 
+        await sock.sendMessage(from, {
             text: '❌ Failed to fetch creator info',
-            quoted: msg 
+            quoted: msg
         });
     }
 }
 
-export const description = "Displays information about the bot creator";
+export const description = "Displays the legendary Peace Ernest's profile 👑";
