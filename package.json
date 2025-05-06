@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node ernest.js",
-    "bot": "node bot.js"
+    "bot": "node bot.js",
+    "build": "echo 'No build step required'"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.17.16",

@@ -10,6 +10,9 @@ import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { messageHandler } from "./handlers/messageHandler.js";
+import express from 'express';
+
+
 
 // Configure environment
 dotenv.config();
@@ -80,6 +83,20 @@ const loadSessionFromEnv = () => {
   }
 };
 
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy',
+    bot: sock ? 'connected' : 'disconnected'
+  });
+});
+
+// Start the server
+app.listen(PORT, () => {
+  logger.info(`🌐 Server running on port ${PORT}`);
+});
 const startBot = async () => {
   if (isShuttingDown) return;
 
