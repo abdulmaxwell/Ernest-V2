@@ -1,0 +1,5 @@
+node_modules
+npm-debug.log
+data/auth_state
+bot.log
+.env
