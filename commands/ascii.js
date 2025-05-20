@@ -4,9 +4,8 @@ export default async function ascii(sock, msg, from, args = []) {
     try {
         if (!args.length) {
             return sock.sendMessage(from, {
-                text: '❌ Usage: !ascii [font] | <text>\nExample: !ascii Slant | Ernest Bot',
-                quoted: msg
-            });
+                text: '❌ Usage: !ascii <font> | <text>\nExample: !ascii Slant | Ernest Bot\nUse !fonts to preview available styles.',
+            }, { quoted: msg });
         }
 
         const input = args.join(' ');
@@ -16,37 +15,44 @@ export default async function ascii(sock, msg, from, args = []) {
 
         if (!text) {
             return sock.sendMessage(from, {
-                text: '❌ Please provide the text after the pipe (|)\nExample: !ascii Slant | Ernest',
-                quoted: msg
-            });
+                text: '❌ Missing text after font.\nFormat: !ascii <font> | <text>',
+            }, { quoted: msg });
         }
 
         const availableFonts = figlet.fontsSync();
-        const useFont = availableFonts.includes(font) ? font : 'Standard';
+        const fontExists = availableFonts.includes(font);
+        const useFont = fontExists ? font : 'Standard';
 
         const ascii = await new Promise((resolve, reject) => {
             figlet.text(text, {
                 font: useFont,
                 horizontalLayout: 'default',
-                verticalLayout: 'default'
+                verticalLayout: 'default',
             }, (err, data) => {
                 if (err || !data) reject(err || new Error('No data'));
                 else resolve(data);
             });
         });
 
-        await sock.sendMessage(from, {
-            text: `🎨 ASCII Art with *${useFont}*\n\n\`\`\`\n${ascii}\n\`\`\``,
-            quoted: msg
-        });
+        let message = `🎨 ASCII Art using *${useFont}*${!fontExists ? ' (fallback to Standard)' : ''}\n\n\`\`\`\n${ascii}\n\`\`\``;
+
+        if (ascii.length > 4000) {
+            message = '⚠️ Text too long to render in WhatsApp.\nTry shorter input or simpler font.';
+        }
+
+        await sock.sendMessage(from, { text: message }, { quoted: msg });
 
     } catch (error) {
         console.error('❌ ASCII command failed:', error);
         await sock.sendMessage(from, {
-            text: '❌ Failed to render ASCII art. Try a different font or text.',
-            quoted: msg
-        });
+            text: '❌ Failed to render ASCII art. Try a different font or shorter text.',
+        }, { quoted: msg });
     }
 }
 
-export const description = "Make cool ASCII art! Use: !ascii <font> | <text>";
+export const description = "Make cool ASCII art! Usage: !ascii <font> | <text>";
+export const category = "fun";
+
+ascii.description = "Make cool ASCII art! Usage: !ascii <font> | <text>";
+ascii.category = "funny";
+//works

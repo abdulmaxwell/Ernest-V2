@@ -10,9 +10,7 @@ import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { messageHandler } from "./handlers/messageHandler.js";
-import express from 'express';
-
-
+import express from "express";
 
 // Configure environment
 dotenv.config();
@@ -86,10 +84,10 @@ const loadSessionFromEnv = () => {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'healthy',
-    bot: sock ? 'connected' : 'disconnected'
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "healthy",
+    bot: sock ? "connected" : "disconnected",
   });
 });
 
@@ -97,6 +95,7 @@ app.get('/health', (req, res) => {
 app.listen(PORT, () => {
   logger.info(`🌐 Server running on port ${PORT}`);
 });
+
 const startBot = async () => {
   if (isShuttingDown) return;
 
@@ -105,15 +104,15 @@ const startBot = async () => {
     logger.info("🚀 Initializing WhatsApp Bot...");
 
     // Load session and write to creds.json
-    const session = loadSessionFromEnv();
-    if (!fs.existsSync(AUTH_FOLDER)) {
-      fs.mkdirSync(AUTH_FOLDER, { recursive: true });
+    const credsPath = join(AUTH_FOLDER, "creds.json");
+    if (!fs.existsSync(credsPath)) {
+      const session = loadSessionFromEnv();
+      fs.writeFileSync(credsPath, JSON.stringify(session, null, 2));
+      logger.info("✅ Session loaded from environment and saved to creds.json");
+    } else {
+      logger.info("✅ Using existing session from creds.json");
     }
-    fs.writeFileSync(
-      join(AUTH_FOLDER, "creds.json"),
-      JSON.stringify(session, null, 2)
-    );
-    logger.info("✅ Session loaded from environment");
+
 
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
 
@@ -134,7 +133,8 @@ const startBot = async () => {
     // Auto-status viewer & AFK logic
     sock.ev.on("messages.upsert", async ({ messages }) => {
       const msg = messages[0];
-      if (!msg.message || msg.key.fromMe) return;
+      // if (!msg.message || msg.key.fromMe) return;
+      if (!msg.message) return;
 
       const from = msg.key.remoteJid;
       const body =
@@ -143,53 +143,57 @@ const startBot = async () => {
       // Handle Math Quiz
       if (global.mathQuiz && global.mathQuiz[from]) {
         const correctAnswer = global.mathQuiz[from].answer;
-
-        // Clean user answer
         const userAnswer = parseFloat(body.replace(/[^0-9.\-]/g, ""));
         if (userAnswer === correctAnswer) {
           clearTimeout(global.mathQuiz[from].timeout);
           delete global.mathQuiz[from];
           await sock.sendMessage(
             from,
-            {
-              text: `✅ Correct! 🎉 You earned bonus points!`,
-            },
+            { text: `✅ Correct! 🎉 You earned bonus points!` },
             { quoted: msg }
           );
         } else {
           await sock.sendMessage(
             from,
-            {
-              text: `❌ Nope! Try again...`,
-            },
+            { text: `❌ Nope! Try again...` },
             { quoted: msg }
           );
         }
       }
 
-      // Handle AFK Logic
+      // AFK Handling
       const senderId = msg.key.participant || msg.key.remoteJid;
       const chatId = msg.key.remoteJid;
 
-      if (chatId.endsWith("@g.us")) return; // Skip group messages
-
-      // AFK handling
       if (afkUsers.has(senderId)) {
-        const { reason, time } = afkUsers.get(senderId);
-        const seconds = Math.floor((Date.now() - time) / 1000);
-        await sock.sendMessage(
-          chatId,
-          {
-            text: `╔══════════════════════╗\n║      AFK NOTICE      ║\n╠══════════════════════╣\n║ User is AFK:         ║\n║ ${reason}            ║\n║ (${seconds}s ago)    ║\n╚══════════════════════╝`,
-          },
-          { quoted: msg }
-        );
-      } else {
-        afkUsers.delete(senderId); // Remove AFK if user sends a message
+        afkUsers.delete(senderId);
+        await sock.sendMessage(chatId, {
+          text: `✅ Welcome back! You've been removed from AFK.`,
+          quoted: msg,
+        });
+      }
+
+      const mentioned =
+        msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+      for (let jid of mentioned) {
+        if (afkUsers.has(jid)) {
+          const { reason, time } = afkUsers.get(jid);
+          const duration = formatDuration(Date.now() - time);
+          await sock.sendMessage(chatId, {
+            text: `💤 That user is currently AFK\n⏱️ Since: ${duration} ago\n📝 Reason: ${reason}`,
+            quoted: msg,
+          });
+        }
+      }
+
+      function formatDuration(ms) {
+        const minutes = Math.floor(ms / 60000);
+        const seconds = Math.floor((ms % 60000) / 1000);
+        return `${minutes}m ${seconds}s`;
       }
     });
 
-    // Reconnect logic
+    // Connection update
     sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
       if (connection === "close") {
         const code =
@@ -206,9 +210,7 @@ const startBot = async () => {
 
         if (retryCount < MAX_RETRIES) {
           retryCount++;
-          logger.info(
-            `🔄 Retrying connection (${retryCount}/${MAX_RETRIES})...`
-          );
+          logger.info(`🔄 Retrying connection (${retryCount}/${MAX_RETRIES})...`);
           setTimeout(startBot, RETRY_DELAY);
         } else {
           logger.error("💀 Max retries reached. Giving up.");
@@ -221,7 +223,7 @@ const startBot = async () => {
         logger.info(`✅ Connected as ${user?.id || "unknown"}`);
         try {
           await sock.sendMessage(user.id, {
-            text: `╔══════════════════════╗\n║   BOT CONNECTED 🌟   ║\n╠══════════════════════╣\n║ ernestV1 is now      ║\n║ online and ready to  ║\n║ serve!               ║\n║                      ║\n║ Version: 2.0         ║\n║ Mode: Session Auth   ║\n╚══════════════════════╝`,
+            text: `╔══════════════════════╗\n║   BOT CONNECTED 🌟   ║\n╠══════════════════════╣\n║ ernestV1 is now      ║\n║ online and ready to  ║\n║ serve!               ║\n║                      ║\n║ Version: 2.0         ║\n║ Mode: Pease Ernest Appriciates that you have chosen the bot thanks    ║\n╚══════════════════════╝`,
           });
         } catch (err) {
           logger.error("❌ Could not send connected message:", err.message);
@@ -229,16 +231,13 @@ const startBot = async () => {
       }
     });
 
-    // Save credentials
     sock.ev.on("creds.update", saveCreds);
   } catch (err) {
     logger.error(`❌ Initialization error: ${err.message}`);
     if (retryCount < MAX_RETRIES) {
       retryCount++;
       logger.info(
-        `🔁 Retrying in ${
-          RETRY_DELAY / 1000
-        }s... (${retryCount}/${MAX_RETRIES})`
+        `🔁 Retrying in ${RETRY_DELAY / 1000}s... (${retryCount}/${MAX_RETRIES})`
       );
       setTimeout(startBot, RETRY_DELAY);
     } else {
@@ -258,5 +257,5 @@ const shutdown = async () => {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-// Start the bot
+// Kick things off
 startBot();

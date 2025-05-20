@@ -4,50 +4,57 @@ export default async function ginfo(sock, msg, from, args) {
     try {
         const groupLink = args[0] || msg.reply_text;
 
-        // Check if groupLink is valid
         if (!groupLink) {
-            return sock.sendMessage(from, { text: "*_Uhh Please, provide group link_*" }, { quoted: msg });
+            return sock.sendMessage(from, { text: "❗ *Please provide a group invite link.*" }, { quoted: msg });
         }
 
-        const matchedLinks = groupLink.match(groupPattern) || false;
+        const matchedLinks = groupLink.match(groupPattern);
 
         if (!matchedLinks) {
-            return sock.sendMessage(from, { text: "*_Uhh Please, provide valid group link_*" }, { quoted: msg });
+            return sock.sendMessage(from, { text: "⚠️ *That doesn't look like a valid WhatsApp group link.*" }, { quoted: msg });
         }
 
         const inviteCode = matchedLinks[0].split("https://chat.whatsapp.com/")[1].trim();
         const groupInfo = await sock.groupGetInviteInfo(inviteCode);
 
-        if (groupInfo) {
-            const creationDate = new Date(groupInfo.creation * 1000);
-            const formattedDate = creationDate.getFullYear() + "-" + 
-                (creationDate.getMonth() + 1).toString().padStart(2, "0") + "-" + 
-                creationDate.getDate().toString().padStart(2, "0");
-
-            const infoText = `${groupInfo.subject}\n\n` +
-                `Creator: wa.me/${groupInfo.owner.split("@")[0]}\n` +
-                `GJid: \`\`\`${groupInfo.id}\`\`\`\n` +
-                `*Muted:* ${groupInfo.announce ? "yes" : "no"}\n` +
-                `*Locked:* ${groupInfo.restrict ? "yes" : "no"}\n` +
-                `*createdAt:* ${formattedDate}\n` +
-                `*participants:* ${groupInfo.size > 3 ? groupInfo.size + "th" : groupInfo.size}\n` +
-                (groupInfo.desc ? `*description:* ${groupInfo.desc}\n` : "") +
-                `\n`;  // Removed Config.caption
-
-            return sock.sendMessage(from, { 
-                text: infoText,
-                mentions: [groupInfo.owner]
-            }, { quoted: msg });
-        } else {
-            await sock.sendMessage(from, { 
-                text: "*_Group Id not found, Sorry!!_*" 
-            }, { quoted: msg });
+        if (!groupInfo) {
+            return sock.sendMessage(from, { text: "🚫 *Could not retrieve group info.*" }, { quoted: msg });
         }
-    } catch (error) {
-        await sock.sendMessage(from, { 
-            text: "*_Group Id not found, Sorry!!_*\n\nError: " + error 
+
+        const creationDate = new Date(groupInfo.creation * 1000);
+        const formattedDate = creationDate.toLocaleDateString('en-GB', {
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit'
+        });
+
+        const owner = groupInfo.owner ? `wa.me/${groupInfo.owner.split('@')[0]}` : 'Unknown';
+
+        const infoText = `👥 *${groupInfo.subject}*\n\n` +
+            `👤 *Creator:* ${owner}\n` +
+            `🆔 *Group ID:* \`\`\`${groupInfo.id}\`\`\`\n` +
+            `🔕 *Muted:* ${groupInfo.announce ? "Yes" : "No"}\n` +
+            `🔒 *Locked:* ${groupInfo.restrict ? "Yes" : "No"}\n` +
+            `📅 *Created On:* ${formattedDate}\n` +
+            `👤 *Participants:* ${groupInfo.size}\n` +
+            (groupInfo.desc ? `📝 *Description:* ${groupInfo.desc}\n` : '');
+
+        return sock.sendMessage(from, {
+            text: infoText.trim(),
+            mentions: groupInfo.owner ? [groupInfo.owner] : []
         }, { quoted: msg });
+
+    } catch (error) {
+        console.error("ginfo error:", error);
+        return sock.sendMessage(from, {
+            text: `❌ *Something went wrong while fetching group info.*\n\n_Error:_ ${error.message || error}`,
+            quoted: msg
+        });
     }
 }
 
-export const description = "Get group info by invite link";
+export const description = "Fetches detailed info about a WhatsApp group via invite link";
+export const category = "group";
+
+ginfo.description = "Fetches detailed info about a WhatsApp group via invite link";
+ginfo.category = "group";

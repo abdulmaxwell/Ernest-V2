@@ -1,0 +1,8 @@
+const afk = async (sock, msg, from, args) => {
+  // your afk logic here
+};
+
+afk.description = "Sets your AFK (Away From Keyboard) status.";
+afk.category = "Utility";
+
+export default afk;

@@ -1,57 +1,71 @@
 export default async function tagAll(sock, msg, from) {
     try {
-        // Check if the command is used in a group chat
+        // Ensure it's in a group
         if (!from.endsWith('@g.us')) {
-            return sock.sendMessage(from, { 
-                text: '❌ This command only works in groups!',
-                quoted: msg 
+            return sock.sendMessage(from, {
+                text: '❌ This command only works in group chats!',
+                quoted: msg
             });
         }
 
-        // Get group metadata and participants
-        const groupInfo = await sock.groupMetadata(from);
-        const participants = groupInfo.participants;
+        // Get group participants
+        const groupMetadata = await sock.groupMetadata(from);
+        const participants = groupMetadata.participants;
 
-        // Check if the sender is an admin
-        const senderId = msg.author || msg.from;
-        const isSenderAdmin = participants.some(p => p.id === senderId && (p.admin === 'admin' || p.admin === 'superadmin'));
-        if (!isSenderAdmin) {
-            return sock.sendMessage(from, { 
-                text: '❌ You need to be an admin to tag members.',
-                quoted: msg 
+        // Get sender ID (works even if forwarded)
+        const sender = msg.key.participant || msg.key.remoteJid;
+
+        // Check admin rights
+        const isAdmin = participants.some(p =>
+            p.id === sender && ['admin', 'superadmin'].includes(p.admin)
+        );
+
+        if (!isAdmin) {
+            return sock.sendMessage(from, {
+                text: '❌ Only group admins can use this command.',
+                quoted: msg
             });
         }
 
-        // Get the IDs of all participants to mention them
+        // Build mentions and list
         const mentions = participants.map(p => p.id);
+        const memberList = participants.map((p, i) => `🔹 *${i + 1}. @${p.id.split('@')[0]}*`).join('\n');
 
-        // Add custom stylish message with more visual appeal
-        const customMessage = `*🚨 Urgent Announcement! 🚨*\n\n` +
-            `⚡️ *Meeting at 4 PM sharp* ⚡️\n\n` +
-            `⏰ *Don't miss it!* ⏰\n\n` +
-            `💬 *Please be on time and ready!* 💬\n\n` +
-            `*📅 Date:* *Today*`;
+        // Custom message body
+        const header = `*🚨 Group Announcement 🚨*`;
+        const message = `
+${header}
 
-        // Stylish list of names with some formatting
-        const namesList = participants
-            .map((p, i) => `🔹 *${i + 1}. @${p.id.split('@')[0]}*`)
-            .join('\n');
+📣 *Attention Everyone!*
+Please take a moment to read the announcement carefully.
 
-        // Send the message mentioning everyone in the group
+🕒 *Time:* 4 PM sharp  
+📅 *Date:* Today  
+📍 *Venue:* This group 😎
+
+💬 *Tag List:*
+${memberList}
+        `.trim();
+
+        // Send message with mentions
         await sock.sendMessage(from, {
-            text: `${customMessage}\n\n*💬 Attendees:*\n\n${namesList}`,
+            text: message,
             mentions,
             contextInfo: {
                 mentionedJid: mentions
             }
         }, { quoted: msg });
-    } catch (error) {
-        console.error('Error in tagAll:', error);
-        await sock.sendMessage(from, { 
-            text: '❌ Failed to tag members. Something went wrong.',
-            quoted: msg 
+
+    } catch (err) {
+        console.error('tagAll error:', err);
+        await sock.sendMessage(from, {
+            text: '❌ Failed to tag everyone. Please try again later.',
+            quoted: msg
         });
     }
 }
 
-export const description = "Tags all group members with a custom, stylish message (Admin only)";
+export const description = "Tags all group members with a formatted message (Admins only)";
+export const category = "group";
+tagAll.description = "tag all group members";
+tagAll.category = "group";

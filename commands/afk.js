@@ -1,4 +1,4 @@
-const afkUsers = new Map();
+export const afkUsers = new Map();
 
 export default async function afk(sock, msg, from, args = []) {
     try {
@@ -7,7 +7,7 @@ export default async function afk(sock, msg, from, args = []) {
         
         afkUsers.set(userId, {
             time: Date.now(),
-            reason: reason
+            reason
         });
         
         await sock.sendMessage(from, { 
@@ -24,3 +24,7 @@ export default async function afk(sock, msg, from, args = []) {
 }
 
 export const description = "Sets your AFK status";
+export const category = "utility";
+
+afk.description = "set afk status";
+afk.category = "utility";

@@ -1,37 +1,48 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import axios from 'axios';
-import figlet from 'figlet';
+import { fileURLToPath, pathToFileURL } from 'url';
+import dotenv from 'dotenv';
+
+dotenv.config(); // Load .env vars
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Global command storage
-const commands = {};
-export const commandDescriptions = {};
+const commands = {}; // Command execution functions
+export const commandDescriptions = {}; // Optional metadata like descriptions
 
-// Load all commands dynamically
+// Dynamically load commands
 export const loadCommands = async () => {
-    const commandFiles = fs.readdirSync(path.join(__dirname, '../commands'))
-        .filter(file => file.endsWith('.js') && !file.startsWith('_'));
+    const commandsPath = path.join(__dirname, '../commands');
+    const commandFiles = fs.readdirSync(commandsPath).filter(
+        file => file.endsWith('.js') && !file.startsWith('_')
+    );
 
     for (const file of commandFiles) {
+        const modulePath = pathToFileURL(path.join(commandsPath, file)).href;
+
         try {
-            const module = await import(`../commands/${file}`);
+            const module = await import(modulePath);
             const commandName = path.basename(file, '.js');
-            commands[commandName] = module.default;
-            
-            if (module.description) {
-                commandDescriptions[commandName] = module.description;
+
+            if (typeof module.default === 'function') {
+                commands[commandName] = module.default;
+
+                if (module.default.description) {
+                    commandDescriptions[commandName] = module.default.description;
+                }
+            } else {
+                console.warn(`Skipping ${file}: No default export found.`);
             }
         } catch (error) {
-            console.error(`Error loading command ${file}:`, error);
+            console.error(`❌ Failed to load command '${file}':`, error);
         }
     }
+
     return commands;
 };
 
+// Main message handler
 export const messageHandler = async (sock) => {
     if (sock._messageHandlerRegistered) return;
     sock._messageHandlerRegistered = true;
@@ -47,9 +58,9 @@ export const messageHandler = async (sock) => {
                 const from = msg.key.remoteJid;
                 if (!from) continue;
 
-                const text = msg.message?.conversation || 
-                            msg.message?.extendedTextMessage?.text || 
-                            msg.message?.buttonsResponseMessage?.selectedButtonId;
+                const text = msg.message?.conversation ||
+                    msg.message?.extendedTextMessage?.text ||
+                    msg.message?.buttonsResponseMessage?.selectedButtonId;
 
                 if (!text || !text.startsWith(prefix)) continue;
 
@@ -59,10 +70,23 @@ export const messageHandler = async (sock) => {
 
                 if (command) {
                     await command(sock, msg, from, args);
+                    // React to the command message
+                    await sock.sendMessage(from, {
+                        react: {
+                            text: '🧩', // or change per command using a map
+                            key: msg.key
+                        }
+                    });
+
+                } else {
+                    console.log(`🚫 Unknown command: ${commandName}`);
                 }
-            } catch (error) {
-                console.error('Error processing message:', error);
+            } catch (err) {
+                console.error('⚠️ Error handling message:', err);
             }
         }
     });
 };
+
+// Export the full command map
+export const commandMap = commands;

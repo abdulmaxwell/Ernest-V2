@@ -4,7 +4,6 @@ import path from 'path';
 export default async function fonts(sock, msg, from) {
     const filePath = path.join(process.cwd(), 'fonts-preview.txt');
 
-    // Send short WhatsApp preview manually
     const previewText = `📑 *Sample Fonts Preview:*\n\n🖋️ *Standard*\n\`\`\`
   _____                      _   
  | ____|_ __ _ __   ___  ___| |_ 
@@ -15,20 +14,46 @@ export default async function fonts(sock, msg, from) {
    ('-.  _  .-')       .-') _   ('-.    
  _(  OO)( \\( -O )     ( OO ) )_(  OO)   
 (,------.,------. ,--./ ,--,'(,------.  
-\`\`\`\``;
+\`\`\`\`\n\n🖋️ *Banner*\n\`\`\`
+####  #    #   ##   #####  ###### ##### 
+#    # #    #  #  #  #    # #      #    #
+#      ###### #    # #    # #####  #    #
+#  ### #    # ###### #    # #      ##### 
+#    # #    # #    # #    # #      #   # 
+ ####  #    # #    # #####  ###### #    #
+\`\`\``;
 
-    // Step 1: Send preview
-    await sock.sendMessage(from, { text: previewText }, { quoted: msg });
+    try {
+        // Send sample font preview first
+        await sock.sendMessage(from, { text: previewText }, { quoted: msg });
 
-    // Step 2: Send existing .txt file
-    await sock.sendMessage(from, {
-        document: fs.readFileSync(filePath),
-        fileName: 'fonts-preview.txt',
-        mimetype: 'text/plain',
-        caption: '📄 Full font preview file for all styles (stored version).'
-    }, { quoted: msg });
+        // Then send full .txt file if it exists
+        if (fs.existsSync(filePath)) {
+            const fileBuffer = fs.readFileSync(filePath);
 
-    // ⛔ DO NOT DELETE — nothing gets removed
+            await sock.sendMessage(from, {
+                document: fileBuffer,
+                fileName: 'fonts-preview.txt',
+                mimetype: 'text/plain',
+                caption: '📄 *Full font preview file with all styles included.*'
+            }, { quoted: msg });
+        } else {
+            await sock.sendMessage(from, {
+                text: '⚠️ *Full font preview file not found. Only sample preview sent.*'
+            }, { quoted: msg });
+        }
+
+    } catch (error) {
+        console.error("Error in fonts command:", error);
+        await sock.sendMessage(from, {
+            text: `❌ *Oops! Something went wrong while loading fonts.*\n\n_Error:_ ${error.message || error}`,
+            quoted: msg
+        });
+    }
 }
 
-export const description = "Preview figlet fonts + download static .txt preview";
+export const description = "Preview cool figlet fonts + get full static preview as .txt";
+export const category = "fun";
+
+fonts.description = "Preview cool figlet fonts + get full static preview as .txt";
+fonts.category = "funny";

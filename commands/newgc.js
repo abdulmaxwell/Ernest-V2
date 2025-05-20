@@ -1,71 +1,97 @@
-import { ownerNumber } from "../config.js"; // or import { isOwner } from "../lib/utils.js"
+import { ownerNumber } from "../config.js";
+import { isOwner } from "../lib/utils.js";
 
 export default async function newgc(sock, msg, from, args) {
     try {
-        if (msg.sender.split("@")[0] !== ownerNumber) {
-            return sock.sendMessage(from, { text: "Only bot owner can use this command" }, { quoted: msg });
+        const sender = msg.sender;
+        const isBotOwner = isOwner(sender);
+
+        if (!isBotOwner) {
+            return sock.sendMessage(from, { 
+                text: "❌ Only the *bot owner* can use this command." 
+            }, { quoted: msg });
         }
 
         if (!args[0]) {
             return sock.sendMessage(from, {
-                text: "*_provide Name to Create new Group!!!_*\n*_Ex: .newgc My Name Group @user1,2,3.._*"
+                text: "*_⚠️ Provide a name to create a new group!_*\nExample:\n``` .newgc My Cool Group @user1,2...```"
             }, { quoted: msg });
         }
 
         let groupName = args.join(' ');
+
+        // If "info" keyword
         if (groupName.toLowerCase() === "info") {
             return sock.sendMessage(from, {
-                text: "\n  *It's a command to create a new group*\n  \t```Ex: .newgc My new Group```\n\n*You can also add people in new group*\n  \t```just reply or mention users```\n"
+                text: "📌 *Usage of .newgc command:*\n\n• Create a group:\n``` .newgc My New Group ```\n\n• Mention or reply to users to add them:\n``` .newgc My New Group @user ```"
             }, { quoted: msg });
         }
 
-        let participants = [msg.sender];
+        // Remove @mentions from group name
+        groupName = groupName.replace(/@\d+/g, "").trim();
 
-        if (msg.quoted) {
+        // Safety check: no empty name
+        if (!groupName) {
+            return sock.sendMessage(from, { 
+                text: "❌ Group name can't be empty after removing mentions." 
+            }, { quoted: msg });
+        }
+
+        let participants = [sender];
+
+        if (msg.quoted?.sender) {
             participants.push(msg.quoted.sender);
         }
 
-        if (msg.mentionedJid && msg.mentionedJid[0]) {
+        if (msg.mentionedJid?.length) {
             participants.push(...msg.mentionedJid);
-            try {
-                msg.mentionedJid.forEach(jid => {
-                    const number = jid.split("@")[0].trim();
-                    groupName = groupName.replace(new RegExp("@" + number, "g"), "");
-                });
-            } catch {}
         }
 
+        // Remove duplicate IDs
+        participants = [...new Set(participants)];
+
+        // Trim group name max length to 60 chars
         const finalGroupName = groupName.substring(0, 60);
+
+        // Create group
         const group = await sock.groupCreate(finalGroupName, participants);
 
-        if (group) {
+        if (group?.id) {
+            const userName = msg.pushName || "Master";
             await sock.sendMessage(group.id, {
-                text: "*_Hey Master, Welcome to the new Group_*\n" + (global.Config?.caption || "")
+                text: `🎉 *Welcome ${userName}!* Your group *"${finalGroupName}"* is live! 🚀\n${global.Config?.caption || ""}`
             });
 
             try {
                 const inviteCode = await sock.groupInviteCode(group.id);
-                const inviteLink = "https://chat.whatsapp.com/" + inviteCode;
+                const inviteLink = `https://chat.whatsapp.com/${inviteCode}`;
 
                 return sock.sendMessage(from, {
-                    text: "*_Hurray, New group created!!!_*\n" + (inviteCode ? "*_" + inviteLink + "_*" : "")
+                    text: `✅ *New group created successfully!*\n📎 *Invite link:*\n${inviteLink}`
                 }, { quoted: msg });
 
-            } catch {
+            } catch (inviteError) {
+                console.error("⚠️ Failed to fetch invite link:", inviteError);
                 return sock.sendMessage(from, {
-                    text: "*_Hurray, New group created!!!_*"
+                    text: "✅ *Group created!*\n(But couldn't get the invite link.)"
                 }, { quoted: msg });
             }
         } else {
-            await sock.sendMessage(from, {
-                text: "*_Can't create new group, Sorry!!_*"
+            return sock.sendMessage(from, {
+                text: "❌ Failed to create the group. Please try again later."
             }, { quoted: msg });
         }
+
     } catch (error) {
-        await sock.sendMessage(from, {
-            text: "*_Can't create new group, Sorry!!_*\n\nError: " + error
+        console.error("❌ Error in newgc command:", error);
+        return sock.sendMessage(from, {
+            text: "❌ *Unexpected error occurred while creating the group.*"
         }, { quoted: msg });
     }
 }
 
-export const description = "Create a new WhatsApp group";
+export const description = "Create a new WhatsApp group and optionally add people";
+export const category = "group";
+
+newgc.description = "create new group";
+newgc.category = "group";

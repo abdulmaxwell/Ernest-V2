@@ -28,25 +28,40 @@ export default async function quote(sock, msg, from) {
             { text: "Work hard in silence, let your success be the noise.", author: "Frank Ocean" }
         ];
 
-        let quoteBox = `🧠 *25 Quotes for the Day* 🧠\n━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        // Shuffle quotes
+        const shuffled = quotes.sort(() => Math.random() - 0.5);
 
-        quotes.forEach((q, i) => {
-            quoteBox += `*${i + 1}.* "${q.text}"\n`;
-            quoteBox += `_— ${q.author}_\n`;
-            quoteBox += `───────────────────────\n`;
+        // Format into chunks (WhatsApp hates long blocks)
+        const chunks = [];
+        let chunk = '*🧠 Quotes of the Day 🧠*\n━━━━━━━━━━━━━━\n';
+
+        shuffled.forEach((q, i) => {
+            const line = `*${i + 1}.* "${q.text}"\n_— ${q.author}_\n\n`;
+            if ((chunk + line).length > 3000) {
+                chunks.push(chunk);
+                chunk = '';
+            }
+            chunk += line;
         });
 
-        quoteBox += `🔥 _Powered by Ernest Tech House_\n💬 _Use them. Live them. Share them._`;
+        chunks.push(chunk);
+        chunks[chunks.length - 1] += '🔥 _Powered by Ernest Tech House_\n💬 _Use them. Live them. Share them._';
 
-        await sock.sendMessage(from, { text: quoteBox }, { quoted: msg });
+        for (const part of chunks) {
+            await sock.sendMessage(from, { text: part }, { quoted: msg });
+        }
 
     } catch (error) {
         console.error('Error in quote:', error);
         await sock.sendMessage(from, {
-            text: '⚠️ Could not load quotes. But hey, you\'re still a legend.',
+            text: '⚠️ Could not load quotes. But you? You’re still the main character today.',
             quoted: msg
         });
     }
 }
 
-export const description = "Drops 25 hardcoded inspirational quotes";
+export const description = "Sends shuffled daily quotes in bite-sized pieces";
+export const category = "fun";
+
+quote.description = "send you nice quotes "
+quote.category = " funny";
