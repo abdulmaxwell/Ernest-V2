@@ -24,16 +24,12 @@
 
 
 
-## Anita-V4 Deployment Methods
+## Ernest V2 Deployment Methods
 ---
 1.  **Fork Repo First, [CLICK HERE](git@github.com:PeaseErnest12287/Ernest-V2.git/fork) (A MUST) and Star ⭐ Repository for Courage.**
 2.  **Get SESSION ID BY [PAIRING CODE](https://rola-v1-sesiongenerator.onrender.com)** 
-3. **Deploy on [HEROKU](https://dashboard.heroku.com/new?template=https://git@github.com:PeaseErnest12287/Ernest-V2.git)**
 3. **Deploy on [RENDER](https://dashboard.render.com/signup)**
-3. **Deploy on [KOYEB](https://app.koyeb.com/services/deploy/?type=git&repository=github.com%2FPeaseErnest12287&branch=main&name=ErnestV2&builder=dockerfile&env%5BAUTO_STATUS_REACT=false%5D=&env%5BSESSION_ID%5D=your%20sessionid%20here&env%5BPUBLIC%5D=true&env=%5BAUTO_TYPING%5D%3Dfalse&env%5BAUTO_STATUS_VIEW%5D=true)** **still under configuration**
-3. **Deploy on [TALKDROVE](https://host.talkdrove.com)**
-3. **Deploy on [BOT HOSTING PANEL(DISCORD)](https://bot-hosting.net/?aff=1251693529084723300) still under confuguration**
-3. **Deploy on [KATBUMP PANEL(DISCORD)](https://dashboard.katabump.com/auth/login#1ae56c) still under confuguration**
+4. **Deploy on [KATBUMP PANEL(DISCORD)](https://dashboard.katabump.com) **
 8. **You can visit Bot whatsapp channel [BY CLICKING HERE](https://whatsapp.com/channel/0029VayK4ty7DAWr0jeCZx0i) for more**
 9. **You can visit Bot whatsapp Group [BY CLICKING HERE](https://chat.whatsapp.com/FAJjIZY3a09Ck73ydqMs4E) for more**
 <!-- 9. **All Tutorials [Here](https://www.youtube.com/@DavidCyril_TECH)** -->
