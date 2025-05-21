@@ -25,7 +25,5 @@ export default async function arch(sock, m) {
 export const description = "Archives current chat";
 export const category = "utility";
 
-
-
-mute.description = description;
-mute.category = category;
+arch.description = description;
+arch.category = category;

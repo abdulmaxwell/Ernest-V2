@@ -11,6 +11,10 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { messageHandler } from "./handlers/messageHandler.js";
 import express from "express";
+import { initScheduler } from './lib/scheduler.js';
+// after sock is ready:
+
+
 
 // Configure environment
 dotenv.config();
@@ -129,6 +133,7 @@ const startBot = async () => {
 
     // Attach message handler
     messageHandler(sock, afkUsers);
+    initScheduler(sock);
 
     // Auto-status viewer & AFK logic
     sock.ev.on("messages.upsert", async ({ messages }) => {

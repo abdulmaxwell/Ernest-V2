@@ -3,7 +3,7 @@ node_modules/
 data
 package-lock.json
 # Environment variables
-
+comand.txt
 
 # Logs
 *.log
