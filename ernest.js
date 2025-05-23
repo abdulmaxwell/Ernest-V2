@@ -5,16 +5,13 @@ import {
   Browsers,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
-import fs from "fs";
+import fs from "fs/promises";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { messageHandler } from "./handlers/messageHandler.js";
 import express from "express";
 import { initScheduler } from './lib/scheduler.js';
-// after sock is ready:
-
-
 
 // Configure environment
 dotenv.config();
@@ -22,14 +19,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Configuration
-const AUTH_FOLDER = join(__dirname, "data", "auth_state");
-const LOG_FILE = join(__dirname, "bot.log");
-const MAX_RETRIES = 5;
-const RETRY_DELAY = 5000;
+const config = {
+  AUTH_FOLDER: join(__dirname, "data", "auth_state"),
+  LOG_FILE: join(__dirname, "bot.log"),
+  MAX_RETRIES: 5,
+  RETRY_DELAY: 5000,
+  PORT: process.env.PORT || 3000,
+  BOT_VERSION: "2.1.0"
+};
 
 // Ensure auth directory exists
-if (!fs.existsSync(AUTH_FOLDER)) {
-  fs.mkdirSync(AUTH_FOLDER, { recursive: true });
+async function ensureAuthFolder() {
+  try {
+    await fs.mkdir(config.AUTH_FOLDER, { recursive: true });
+  } catch (err) {
+    console.error("Failed to create auth folder:", err);
+    process.exit(1);
+  }
 }
 
 // Logger setup
@@ -43,224 +49,181 @@ const logger = pino({
       ignore: "pid,hostname",
     },
   },
-  destination: pino.destination(LOG_FILE),
 });
 
-// State
-let retryCount = 0;
-let sock = null;
-let isShuttingDown = false;
-
-// In-memory AFK map
-const afkUsers = new Map();
-
-// Cleanup function
-const cleanup = async () => {
-  if (sock) {
-    try {
-      logger.info("🧹 Cleaning up previous connection...");
-      await sock.end();
-      sock.ev.removeAllListeners();
-      sock = null;
-    } catch (e) {
-      logger.error("Error during cleanup:", e);
-    }
-  }
-};
-
-// Load session from .env
-const loadSessionFromEnv = () => {
+// Session management
+async function initializeSession() {
   if (!process.env.WHATSAPP_SESSION) {
     throw new Error("WHATSAPP_SESSION environment variable not set");
   }
 
   try {
-    const decoded = Buffer.from(
-      process.env.WHATSAPP_SESSION,
-      "base64"
-    ).toString("utf-8");
-    return JSON.parse(decoded);
-  } catch (e) {
-    throw new Error("Failed to parse session from environment: " + e.message);
+    const decoded = Buffer.from(process.env.WHATSAPP_SESSION, "base64").toString("utf-8");
+    const session = JSON.parse(decoded);
+    const credsPath = join(config.AUTH_FOLDER, "creds.json");
+    
+    await fs.writeFile(credsPath, JSON.stringify(session, null, 2));
+    logger.info("Session initialized from environment variable");
+    
+    return true;
+  } catch (err) {
+    logger.error("Session initialization failed:", err);
+    throw err;
   }
-};
+}
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+// WhatsApp Bot Class
+class WhatsAppBot {
+  constructor() {
+    this.sock = null;
+    this.retryCount = 0;
+    this.afkUsers = new Map();
+    this.app = express();
+  }
 
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "healthy",
-    bot: sock ? "connected" : "disconnected",
-  });
-});
-
-// Start the server
-app.listen(PORT, () => {
-  logger.info(`🌐 Server running on port ${PORT}`);
-});
-
-const startBot = async () => {
-  if (isShuttingDown) return;
-
-  try {
-    await cleanup();
-    logger.info("🚀 Initializing WhatsApp Bot...");
-
-    // Load session and write to creds.json
-    const credsPath = join(AUTH_FOLDER, "creds.json");
-    if (!fs.existsSync(credsPath)) {
-      const session = loadSessionFromEnv();
-      fs.writeFileSync(credsPath, JSON.stringify(session, null, 2));
-      logger.info("✅ Session loaded from environment and saved to creds.json");
-    } else {
-      logger.info("✅ Using existing session from creds.json");
+  async start() {
+    try {
+      await ensureAuthFolder();
+      await initializeSession();
+      
+      this.setupExpressServer();
+      await this.connectWhatsApp();
+      
+    } catch (err) {
+      logger.error("Bot startup failed:", err);
+      await this.handleRetry();
     }
+  }
 
+  setupExpressServer() {
+    this.app.get("/health", (req, res) => {
+      res.status(200).json({
+        status: "running",
+        connected: !!this.sock
+      });
+    });
 
-    const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
+    this.app.listen(config.PORT, () => {
+      logger.info(`🌐 Health server running on port ${config.PORT}`);
+    });
+  }
 
-    sock = makeWASocket({
+  async connectWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState(config.AUTH_FOLDER);
+    
+    this.sock = makeWASocket({
       auth: state,
       logger: pino({ level: "silent" }),
-      browser: Browsers.macOS("Chrome"),
-      markOnlineOnConnect: true,
-      syncFullHistory: false,
-      getMessage: async () => undefined,
-      printQRInTerminal: false,
+      browser: Browsers.macOS("Desktop"),
+      printQRInTerminal: false, // Disabled as per request
       shouldSyncHistoryMessage: () => false,
+      syncFullHistory: false,
+      markOnlineOnConnect: true
     });
 
-    // Attach message handler
-    messageHandler(sock, afkUsers);
-    initScheduler(sock);
+    // Setup event handlers
+    this.setupEventHandlers(saveCreds);
+    messageHandler(this.sock, this.afkUsers);
+    initScheduler(this.sock);
 
-    // Auto-status viewer & AFK logic
-    sock.ev.on("messages.upsert", async ({ messages }) => {
-      const msg = messages[0];
-      // if (!msg.message || msg.key.fromMe) return;
-      if (!msg.message) return;
+    logger.info("WhatsApp connection initialized");
+  }
 
-      const from = msg.key.remoteJid;
-      const body =
-        msg.message?.conversation || msg.message?.extendedTextMessage?.text;
-
-      // Handle Math Quiz
-      if (global.mathQuiz && global.mathQuiz[from]) {
-        const correctAnswer = global.mathQuiz[from].answer;
-        const userAnswer = parseFloat(body.replace(/[^0-9.\-]/g, ""));
-        if (userAnswer === correctAnswer) {
-          clearTimeout(global.mathQuiz[from].timeout);
-          delete global.mathQuiz[from];
-          await sock.sendMessage(
-            from,
-            { text: `✅ Correct! 🎉 You earned bonus points!` },
-            { quoted: msg }
-          );
-        } else {
-          await sock.sendMessage(
-            from,
-            { text: `❌ Nope! Try again...` },
-            { quoted: msg }
-          );
-        }
+  setupEventHandlers(saveCreds) {
+    this.sock.ev.on("connection.update", async (update) => {
+      logger.debug("Connection update:", update);
+      
+      if (update.connection === "close") {
+        await this.handleDisconnection(update.lastDisconnect);
       }
 
-      // AFK Handling
-      const senderId = msg.key.participant || msg.key.remoteJid;
-      const chatId = msg.key.remoteJid;
-
-      if (afkUsers.has(senderId)) {
-        afkUsers.delete(senderId);
-        await sock.sendMessage(chatId, {
-          text: `✅ Welcome back! You've been removed from AFK.`,
-          quoted: msg,
-        });
-      }
-
-      const mentioned =
-        msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-      for (let jid of mentioned) {
-        if (afkUsers.has(jid)) {
-          const { reason, time } = afkUsers.get(jid);
-          const duration = formatDuration(Date.now() - time);
-          await sock.sendMessage(chatId, {
-            text: `💤 That user is currently AFK\n⏱️ Since: ${duration} ago\n📝 Reason: ${reason}`,
-            quoted: msg,
-          });
-        }
-      }
-
-      function formatDuration(ms) {
-        const minutes = Math.floor(ms / 60000);
-        const seconds = Math.floor((ms % 60000) / 1000);
-        return `${minutes}m ${seconds}s`;
+      if (update.connection === "open") {
+        await this.handleSuccessfulConnection();
       }
     });
 
-    // Connection update
-    sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
-      if (connection === "close") {
-        const code =
-          lastDisconnect?.error?.output?.statusCode ||
-          lastDisconnect?.error?.output?.payload?.statusCode;
-        logger.warn(`⚠️ Connection closed (Code: ${code || "unknown"})`);
+    this.sock.ev.on("creds.update", saveCreds);
+  }
 
-        if (code === DisconnectReason.loggedOut) {
-          logger.error(
-            "❌ Session logged out. Please update WHATSAPP_SESSION in .env"
-          );
-          return;
-        }
+  async handleDisconnection(lastDisconnect) {
+    const code = lastDisconnect?.error?.output?.statusCode || 
+                lastDisconnect?.error?.output?.payload?.statusCode;
+    
+    logger.warn(`Connection closed (Code: ${code || "unknown"})`);
 
-        if (retryCount < MAX_RETRIES) {
-          retryCount++;
-          logger.info(`🔄 Retrying connection (${retryCount}/${MAX_RETRIES})...`);
-          setTimeout(startBot, RETRY_DELAY);
-        } else {
-          logger.error("💀 Max retries reached. Giving up.");
-        }
-      }
+    if (code === DisconnectReason.loggedOut) {
+      logger.error("Session logged out. Please update WHATSAPP_SESSION.");
+      return;
+    }
 
-      if (connection === "open") {
-        retryCount = 0;
-        const user = sock.user;
-        logger.info(`✅ Connected as ${user?.id || "unknown"}`);
-        try {
-          await sock.sendMessage(user.id, {
-            text: `╔══════════════════════╗\n║   BOT CONNECTED 🌟   ║\n╠══════════════════════╣\n║ ernestV1 is now      ║\n║ online and ready to  ║\n║ serve!               ║\n║                      ║\n║ Version: 2.0         ║\n║ Mode: Pease Ernest Appriciates that you have chosen the bot thanks    ║\n╚══════════════════════╝`,
-          });
-        } catch (err) {
-          logger.error("❌ Could not send connected message:", err.message);
-        }
-      }
-    });
+    await this.handleRetry();
+  }
 
-    sock.ev.on("creds.update", saveCreds);
-  } catch (err) {
-    logger.error(`❌ Initialization error: ${err.message}`);
-    if (retryCount < MAX_RETRIES) {
-      retryCount++;
-      logger.info(
-        `🔁 Retrying in ${RETRY_DELAY / 1000}s... (${retryCount}/${MAX_RETRIES})`
-      );
-      setTimeout(startBot, RETRY_DELAY);
-    } else {
-      logger.error("💥 Max init retries reached.");
+  async handleSuccessfulConnection() {
+    this.retryCount = 0;
+    const user = this.sock.user;
+    logger.info(`✅ Connected as ${user?.id || "unknown"}`);
+
+    try {
+      await this.sendConnectionNotification(user.id);
+    } catch (err) {
+      logger.error("Failed to send connection notification:", err);
     }
   }
-};
 
-// Shutdown handling
-const shutdown = async () => {
-  isShuttingDown = true;
-  logger.info("🛑 Shutting down gracefully...");
-  await cleanup();
+  async sendConnectionNotification(userId) {
+    const message = `
+╔══════════════════════════════╗
+║    *ERNEST TECH HOUSE BOT*   ║
+╠══════════════════════════════╣
+║ Status: Connected            ║
+║ Version: ${config.BOT_VERSION.padEnd(15)}║
+║                              ║
+║ Authenticated via session ID ║
+║ No QR code required          ║
+╚══════════════════════════════╝
+    `.trim();
+
+    await this.sock.sendMessage(userId, { text: message });
+  }
+
+  async handleRetry() {
+    if (this.retryCount < config.MAX_RETRIES) {
+      this.retryCount++;
+      logger.info(`Retrying connection (${this.retryCount}/${config.MAX_RETRIES})...`);
+      setTimeout(() => this.start(), config.RETRY_DELAY);
+    } else {
+      logger.error("Max retries reached. Shutting down.");
+      process.exit(1);
+    }
+  }
+
+  async cleanup() {
+    if (this.sock) {
+      try {
+        await this.sock.end();
+        this.sock.ev.removeAllListeners();
+      } catch (err) {
+        logger.error("Cleanup error:", err);
+      }
+    }
+  }
+}
+
+// Process handlers
+process.on("SIGINT", async () => {
+  await bot.cleanup();
   process.exit(0);
-};
+});
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.on("SIGTERM", async () => {
+  await bot.cleanup();
+  process.exit(0);
+});
 
-// Kick things off
-startBot();
+// Start the bot
+const bot = new WhatsAppBot();
+bot.start().catch(err => {
+  logger.error("Fatal error:", err);
+  process.exit(1);
+});
