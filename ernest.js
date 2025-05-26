@@ -25,8 +25,20 @@ const config = {
   MAX_RETRIES: 5,
   RETRY_DELAY: 5000,
   PORT: process.env.PORT || 3000,
-  BOT_VERSION: "2.1.0"
+  BOT_VERSION: "2.1.0",
+  // Presence settings
+  PRESENCE: {
+    TYPING: process.env.TYPING === 'true',
+    AUDIO: process.env.AUDIO === 'true',
+    ALWAYS_ONLINE: process.env.ALWAYS_ONLINE === 'true'
+  }
 };
+
+// Validate presence settings - only one can be true
+if (config.PRESENCE.TYPING && config.PRESENCE.AUDIO) {
+  config.PRESENCE.AUDIO = false; // Default to typing if both are true
+  console.warn("Both TYPING and AUDIO cannot be true simultaneously. Defaulting to TYPING.");
+}
 
 // Ensure auth directory exists
 async function ensureAuthFolder() {
@@ -79,6 +91,7 @@ class WhatsAppBot {
     this.retryCount = 0;
     this.afkUsers = new Map();
     this.app = express();
+    this.presenceSettings = config.PRESENCE;
   }
 
   async start() {
@@ -99,7 +112,8 @@ class WhatsAppBot {
     this.app.get("/health", (req, res) => {
       res.status(200).json({
         status: "running",
-        connected: !!this.sock
+        connected: !!this.sock,
+        presence: this.presenceSettings
       });
     });
 
@@ -115,15 +129,15 @@ class WhatsAppBot {
       auth: state,
       logger: pino({ level: "silent" }),
       browser: Browsers.macOS("Desktop"),
-      printQRInTerminal: false, // Disabled as per request
+      printQRInTerminal: false,
       shouldSyncHistoryMessage: () => false,
       syncFullHistory: false,
-      markOnlineOnConnect: true
+      markOnlineOnConnect: this.presenceSettings.ALWAYS_ONLINE
     });
 
     // Setup event handlers
     this.setupEventHandlers(saveCreds);
-    messageHandler(this.sock, this.afkUsers);
+    messageHandler(this.sock, this.afkUsers, this.presenceSettings);
     initScheduler(this.sock);
 
     logger.info("WhatsApp connection initialized");
@@ -172,12 +186,18 @@ class WhatsAppBot {
   }
 
   async sendConnectionNotification(userId) {
+    const statusEmoji = (status) => status ? '✅' : '❌';
+    
     const message = `
 ╔══════════════════════════════╗
 ║    *ERNEST TECH HOUSE BOT*   ║
 ╠══════════════════════════════╣
 ║ Status: Connected            ║
 ║ Version: ${config.BOT_VERSION.padEnd(15)}║
+║                              ║
+║ Always Online: ${statusEmoji(this.presenceSettings.ALWAYS_ONLINE)}           ║
+║ Typing: ${statusEmoji(this.presenceSettings.TYPING)}                 ║
+║ Audio: ${statusEmoji(this.presenceSettings.AUDIO)}                  ║
 ║                              ║
 ║ Authenticated via session ID ║
 ║ No QR code required          ║

@@ -26,6 +26,9 @@
     "pino-pretty": "^13.0.0",
     "qrcode": "^1.5.3",
     "socket.io": "^4.8.1",
+    "tiktok-scraper": "^1.4.36",
+    "video-url-link": "^0.1.5",
+    "wa-sticker-formatter": "^4.4.4",
     "yt-search": "^2.13.1"
   }
 }
