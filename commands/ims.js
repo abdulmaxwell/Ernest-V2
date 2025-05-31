@@ -1,31 +1,65 @@
 import { Sticker, StickerTypes } from 'wa-sticker-formatter';
-import { convertToSticker } from '../utils/mediaUtils';
 
 export default async function ims(sock, msg, from, args) {
     try {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        const isImage = msg.message?.imageMessage || quotedMsg?.imageMessage;
+        console.log("🖼️ Starting image to sticker conversion...");
         
-        if (!isImage) {
-            return sock.sendMessage(from, { text: 'Please send or quote an image to convert to sticker' });
+        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        const imageMessage = msg.message?.imageMessage || quotedMsg?.imageMessage;
+        
+        if (!imageMessage) {
+            console.log("❌ No image found");
+            return sock.sendMessage(from, { 
+                text: '❌ *Please send or reply to an image to convert to sticker*' 
+            }, { quoted: msg });
         }
 
-        const media = msg.message?.imageMessage || quotedMsg?.imageMessage;
-        const stream = await sock.downloadMedia(media);
-        const buffer = Buffer.from(await stream.toArrayBuffer());
+        console.log("📥 Downloading image...");
+        
+        const stream = await sock.downloadContentFromMessage(imageMessage, 'image');
+        const chunks = [];
+        
+        for await (const chunk of stream) {
+            chunks.push(chunk);
+        }
+        
+        const buffer = Buffer.concat(chunks);
+        console.log(`✅ Downloaded ${buffer.length} bytes`);
 
-        const stickerOptions = await convertToSticker(buffer);
-        const sticker = new Sticker(buffer, stickerOptions);
+        if (buffer.length === 0) {
+            throw new Error("Downloaded buffer is empty");
+        }
 
-        await sock.sendMessage(from, await sticker.toMessage());
+        console.log("🔄 Converting to sticker...");
+        
+        const sticker = new Sticker(buffer, {
+            pack: args.join(' ') || 'Ernest Bot',
+            author: 'Ernest v2',
+            type: StickerTypes.FULL,
+            categories: ['🤖', '💫'],
+            id: Date.now().toString(),
+            quality: 50
+        });
+
+        const stickerBuffer = await sticker.toBuffer();
+        
+        console.log("📤 Sending sticker...");
+        await sock.sendMessage(from, {
+            sticker: stickerBuffer
+        }, { quoted: msg });
+        
+        console.log("✅ Sticker sent successfully!");
         
     } catch (error) {
-        console.error('Error in ims command:', error);
+        console.error('❌ Error in ims command:', error);
         await sock.sendMessage(from, { 
-            text: 'Failed to convert image to sticker. Please try with a different image.'
-        });
+            text: `❌ *Failed to convert image to sticker*\n\n_Error:_ ${error.message}`
+        }, { quoted: msg });
     }
 }
 
-export const description = "Converts images to stickers with Ernest pack";
+export const description = "Converts images to stickers with custom pack name";
 export const category = "Media";
+
+ims.description = description;
+ims.category = category;

@@ -1,0 +1,60 @@
+{
+    "bot-name": "ErnestV2",
+    "description": "Bot made by Ernest Tech House - The 1st emerging bot in the whole world",
+    "logo": "https://avatars.githubusercontent.com/u/173539960?s=400&v=4",
+    "keywords": ["bot", "whatsapp"],
+    "owner-verification": "peaseernest12287@gmail.com",
+  
+    "env": {
+      "SESSION_ID": {
+        "description": "WhatsApp session string",
+        "value": "your_session_string_here",
+        "required": true
+      },
+      "PREFIX": {
+        "description": "Bot command prefix",
+        "value": ".",
+        "required": true
+      },
+      "OWNER_NUMBER": {
+        "description": "Owner number with country code",
+        "value": "254793859108",
+        "required": true
+      },
+      "SPECIAL_NUMBERS": {
+        "description": "Special numbers with country codes, comma separated",
+        "value": "254797934968,254742681410,254710494999,254104825568,256782154150,256756635051,254757719636,254115522243,254745810049",
+        "required": false
+      },
+      "MODE": {
+        "description": "Bot mode (public/private)",
+        "value": "public",
+        "required": true
+      },
+      "ALWAYS_ONLINE": {
+        "description": "Keep bot always online",
+        "value": "true",
+        "required": false
+      },
+      "TYPING": {
+        "description": "Show typing indicator if true the audio should be false",
+        "value": "true",
+        "required": false
+      },
+      "AUDIO": {
+        "description": "Enable audio features if true the typing should be false",
+        "value": "false",
+        "required": false
+      },
+      "TIMEZONE": {
+        "description": "Server timezone",
+        "value": "Africa/Nairobi",
+        "required": false
+      },
+      "WEATHER_API_KEY": {
+        "description": "Weather API key",
+        "value": "4eae741def192d7170adcc74d60d9ceb",
+        "required": false
+      }
+    }
+}

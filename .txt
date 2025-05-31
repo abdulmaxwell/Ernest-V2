@@ -1,22 +1,498 @@
-BOT_OWNER=Ernest Pease
-BOT_NAME=ErnestBot
-BOT_VERSION=2.0.1
-BOT_COMMAND_COUNT=21
-OWNER_NUMBER=254793859108 
-SPECIAL_NUMBERS= 254797934968,254742681410,254710494999,254104825568,256782154150,256756635051,254757719636,254115522243,254745810049
-UNIQUE_ID= 1
-PORT=3000
-LOG_LEVEL=debug
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+import dotenv from 'dotenv';
 
-MORNING_MESSAGE=Good morning! Hope your day is amazing ☀️
-MID_MESSAGE="Keep pushing! You're doing great 💪"
-NIGHT_MESSAGE=Good night, rest well 😴
+dotenv.config();
 
-BOT_REPO=https://github.com/PeaseErnest12287/Ernest-V2.git
-BOT_GROUP=https://chat.whatsapp.com/FAJjIZY3a09Ck73ydqMs4E
-BOT_CHANNEL=https://whatsapp.com/channel/0029VayK4ty7DAWr0jeCZx0i
-PREFIX = .
-PYTHON_API_URL=http://localhost:5000
-BOT_IMAGE= "https://avatars.githubusercontent.com/u/173539960?s=400&v=4"
-WEATHER_API_KEY=4eae741def192d7170adcc74d60d9ceb  
-WHATSAPP_SESSION= "eyJub2lzZUtleSI6eyJwcml2YXRlIjp7InR5cGUiOiJCdWZmZXIiLCJkYXRhIjoiS0NHRk52cnhQTDNLcmZUcWQxeExUNkVJTzNWQTBaTGN3elk5N0MyRkdXaz0ifSwicHVibGljIjp7InR5cGUiOiJCdWZmZXIiLCJkYXRhIjoiQ0pGNThzdjVJaytqbVEvdER5MFJCeFRtYUpUenpHLy9sazA1a0s1WGd5Yz0ifX0sInBhaXJpbmdFcGhlbWVyYWxLZXlQYWlyIjp7InByaXZhdGUiOnsidHlwZSI6IkJ1ZmZlciIsImRhdGEiOiJzRmdHUkpCcDNWYVlIN2R0S1Fpc0t0T29zazhTcFJKbUNUOE9iVmpla0ZvPSJ9LCJwdWJsaWMiOnsidHlwZSI6IkJ1ZmZlciIsImRhdGEiOiJOc2lJOE1OR3loakx1ck1mYjY3REd6OENvMzJDK013dWdVQnMxNHdFREh3PSJ9fSwic2lnbmVkSWRlbnRpdHlLZXkiOnsicHJpdmF0ZSI6eyJ0eXBlIjoiQnVmZmVyIiwiZGF0YSI6Ik9CMGJCQU9PU1BuRG1XZEhJUVVtaXFDNkhGY1l2bEpKZVJVU0t4ck1WM289In0sInB1YmxpYyI6eyJ0eXBlIjoiQnVmZmVyIiwiZGF0YSI6Im55L01hVzJFcitmNlJHc0wrdXRMY0paa2VVa2tyNU5LeWZJZWtTYmhyZ0E9In19LCJzaWduZWRQcmVLZXkiOnsia2V5UGFpciI6eyJwcml2YXRlIjp7InR5cGUiOiJCdWZmZXIiLCJkYXRhIjoiOEJldExLdFg0M3ZXZXd3V0RBLzBDNzkzUS9GT1Z2TXJYU3pOZnhTbzJVZz0ifSwicHVibGljIjp7InR5cGUiOiJCdWZmZXIiLCJkYXRhIjoiMTZrMWwyR2F4ZnVYcHJFZExIMzF2UkRaRzNaUCtPalh5TkdjYjRMY3NGST0ifX0sInNpZ25hdHVyZSI6eyJ0eXBlIjoiQnVmZmVyIiwiZGF0YSI6IjBsd3BjYnhWZ1lkVkp6dURpUTc5U1huT1RpdXQ5Z1VjSjF4Qjd3THlZSjFYS2l3YUFDVXYrUUNFZ1FDaUFCUWNlVDVOTDBLR1Y2UGVyeUdqNWE2VkR3PT0ifSwia2V5SWQiOjF9LCJyZWdpc3RyYXRpb25JZCI6MTIzLCJhZHZTZWNyZXRLZXkiOiJnOXlqaTdiRVBOSm9vRTNqYWpEaGFpUDZDUVpNY0NmYVplRks3b1FLMDBBPSIsInByb2Nlc3NlZEhpc3RvcnlNZXNzYWdlcyI6W3sia2V5Ijp7InJlbW90ZUppZCI6IjI1NDc5Mzg1OTEwOEBzLndoYXRzYXBwLm5ldCIsImZyb21NZSI6dHJ1ZSwiaWQiOiJFRTA3OUI0OTRBMzk5MjA1RjBGNDQxMTI2QjNFNTFCQSJ9LCJtZXNzYWdlVGltZXN0YW1wIjoxNzQ4MDExNjc4fV0sIm5leHRQcmVLZXlJZCI6MzEsImZpcnN0VW51cGxvYWRlZFByZUtleUlkIjozMSwiYWNjb3VudFN5bmNDb3VudGVyIjowLCJhY2NvdW50U2V0dGluZ3MiOnsidW5hcmNoaXZlQ2hhdHMiOmZhbHNlfSwicmVnaXN0ZXJlZCI6ZmFsc2UsImFjY291bnQiOnsiZGV0YWlscyI6IkNJejIyejRRakpYQ3dRWVlBU0FBS0FBPSIsImFjY291bnRTaWduYXR1cmVLZXkiOiJmY3NTa2xlMU8yQWpGYWV6VDQvRC8zcFZUVGNFV3VJMkVmZEE0MW8wcTBRPSIsImFjY291bnRTaWduYXR1cmUiOiI5VHAxdG9DaGRqc3N3eGxFalF0YTVxY0lvbkkyWVlhWURJL1R2RVVLR21ROVBXcTE5T0cvWHEzTFpUTkpnRG54UG5kNDIrUVk5MlpiODd0R2dSbmREdz09IiwiZGV2aWNlU2lnbmF0dXJlIjoiM2dZTmQ5aDVEdlYyS1hCYlVTL2VjcHducUJIV0ZjaFRKU1hnRHJKV000dFhWdDF2S0RUazB1d3RhQ3d3Yk5jTE1heFN3VkJEVFlCR25YNFZwU2JiQnc9PSJ9LCJtZSI6eyJpZCI6IjI1NDc5Mzg1OTEwODoxOEBzLndoYXRzYXBwLm5ldCIsImxpZCI6IjI1Njk3NDEwMDg5MDAxOjE4QGxpZCJ9LCJzaWduYWxJZGVudGl0aWVzIjpbeyJpZGVudGlmaWVyIjp7Im5hbWUiOiIyNTQ3OTM4NTkxMDg6MThAcy53aGF0c2FwcC5uZXQiLCJkZXZpY2VJZCI6MH0sImlkZW50aWZpZXJLZXkiOnsidHlwZSI6IkJ1ZmZlciIsImRhdGEiOiJCWDNMRXBKWHRUdGdJeFduczArUHcvOTZWVTAzQkZyaU5oSDNRT05hTkt0RSJ9fV0sInBsYXRmb3JtIjoiYW5kcm9pZCIsInJvdXRpbmdJbmZvIjp7InR5cGUiOiJCdWZmZXIiLCJkYXRhIjoiQ0FVSUNBPT0ifSwibGFzdEFjY291bnRTeW5jVGltZXN0YW1wIjoxNzQ4MDExNjczLCJsYXN0UHJvcEhhc2giOiIxSzRoSDQifQ=="
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const commands = {};
+export const commandDescriptions = {};
+
+// Enhanced emoji system with categories and reactions
+const commandEmojis = {
+    // System & Info
+    'help': '🤖', 'ping': '🏓', 'info': '📊', 'status': '💡', 'version': '🔢',
+    
+    // Moderation & Admin
+    'ban': '🔨', 'kick': '👢', 'mute': '🔇', 'warn': '⚠️', 'clear': '🧹',
+    
+    // Fun & Entertainment
+    'joke': '😂', 'meme': '🖼️', 'quote': '💬', 'dice': '🎲', 'flip': '🪙',
+    'fact': '🧠', 'trivia': '🎯', 'story': '📚', 'riddle': '🧩',
+    
+    // Utility & Tools
+    'weather': '🌤️', 'time': '🕒', 'calc': '🧮', 'remind': '⏰', 'convert': '🔄',
+    'search': '🔍', 'translate': '🌐', 'qr': '📱', 'shorten': '🔗',
+    
+    // Media & Content
+    'download': '⬇️', 'image': '🖼️', 'music': '🎵', 'video': '🎬', 'gif': '🎭',
+    
+    // Social & Interaction
+    'poll': '📊', 'vote': '🗳️', 'announce': '📢', 'welcome': '👋', 'goodbye': '👋',
+    
+    // Gaming
+    'game': '🎮', 'leaderboard': '🏆', 'points': '⭐', 'level': '📈',
+    
+    // Special reactions
+    '_success': ['✅', '🎉', '💯', '🔥', '⚡'],
+    '_error': ['❌', '💥', '🚫', '😵'],
+    '_thinking': ['🤔', '💭', '🧠', '⚡'],
+    '_working': ['⚙️', '🔧', '💻', '🛠️'],
+    '_default': '✨'
+};
+
+// Cool loading animations
+const loadingAnimations = [
+    ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
+    ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'],
+    ['⭐', '🌟', '✨', '💫', '⭐'],
+    ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣']
+];
+
+// User activity tracking
+const userActivity = new Map();
+const commandStats = new Map();
+const cooldowns = new Map();
+
+// Smart response system
+class SmartResponder {
+    constructor() {
+        this.contextMemory = new Map();
+        this.userPreferences = new Map();
+        this.conversationFlow = new Map();
+    }
+
+    // Remember conversation context
+    rememberContext(userId, command, response) {
+        if (!this.contextMemory.has(userId)) {
+            this.contextMemory.set(userId, []);
+        }
+        const userContext = this.contextMemory.get(userId);
+        userContext.push({ command, response, timestamp: Date.now() });
+        
+        // Keep only last 10 interactions
+        if (userContext.length > 10) {
+            userContext.shift();
+        }
+    }
+
+    // Get personalized greeting
+    getPersonalizedGreeting(userId) {
+        const activity = userActivity.get(userId);
+        const hour = new Date().getHours();
+        
+        let timeGreeting = '';
+        if (hour < 12) timeGreeting = 'Good morning';
+        else if (hour < 17) timeGreeting = 'Good afternoon';
+        else timeGreeting = 'Good evening';
+
+        if (activity && activity.lastSeen) {
+            const lastSeen = Date.now() - activity.lastSeen;
+            if (lastSeen > 86400000) { // 24 hours
+                return `${timeGreeting}! Welcome back! 🎉`;
+            } else if (lastSeen > 3600000) { // 1 hour
+                return `${timeGreeting}! Good to see you again! 😊`;
+            }
+        }
+        
+        return `${timeGreeting}! 👋`;
+    }
+}
+
+const smartResponder = new SmartResponder();
+
+// Advanced presence management with realistic typing speeds
+const handleAdvancedPresence = async (sock, msg, presenceSettings, commandName) => {
+    if (!presenceSettings.TYPING && !presenceSettings.AUDIO) return;
+
+    const from = msg.key.remoteJid;
+    const isComplexCommand = ['help', 'weather', 'search', 'translate'].includes(commandName);
+    
+    try {
+        // Show appropriate presence based on command type
+        const presenceType = presenceSettings.AUDIO ? 'recording' : 'composing';
+        await sock.sendPresenceUpdate(presenceType, from);
+        
+        // Realistic typing duration based on command complexity
+        const typingDuration = isComplexCommand ? 
+            Math.random() * 3000 + 2000 : // 2-5 seconds for complex
+            Math.random() * 1500 + 1000;  // 1-2.5 seconds for simple
+        
+        setTimeout(async () => {
+            try {
+                await sock.sendPresenceUpdate('paused', from);
+            } catch (error) {
+                console.error('Error hiding presence:', error);
+            }
+        }, typingDuration);
+        
+        return typingDuration;
+    } catch (error) {
+        console.error('Error setting presence:', error);
+        return 1000;
+    }
+};
+
+// Cool loading message with animation
+const sendLoadingMessage = async (sock, from, messageKey) => {
+    const animation = loadingAnimations[Math.floor(Math.random() * loadingAnimations.length)];
+    let frame = 0;
+    
+    const loadingMsg = await sock.sendMessage(from, {
+        text: `${animation[0]} Processing your request...`
+    });
+    
+    const interval = setInterval(async () => {
+        frame = (frame + 1) % animation.length;
+        try {
+            await sock.sendMessage(from, {
+                text: `${animation[frame]} Processing your request...`,
+                edit: loadingMsg.key
+            });
+        } catch (err) {
+            clearInterval(interval);
+        }
+    }, 200);
+    
+    // Clean up after 3 seconds
+    setTimeout(() => {
+        clearInterval(interval);
+    }, 3000);
+    
+    return loadingMsg;
+};
+
+// Smart reaction system
+const getSmartReaction = (commandName, success = true, userId = null) => {
+    // Check if user has preferences
+    const userPrefs = smartResponder.userPreferences.get(userId);
+    
+    if (success) {
+        if (commandEmojis[commandName]) {
+            return commandEmojis[commandName];
+        }
+        
+        // Random success reaction
+        const successReactions = commandEmojis._success;
+        return successReactions[Math.floor(Math.random() * successReactions.length)];
+    } else {
+        const errorReactions = commandEmojis._error;
+        return errorReactions[Math.floor(Math.random() * errorReactions.length)];
+    }
+};
+
+// Command analytics and stats
+const trackCommandUsage = (commandName, userId) => {
+    // Track global command stats
+    const currentCount = commandStats.get(commandName) || 0;
+    commandStats.set(commandName, currentCount + 1);
+    
+    // Track user activity
+    if (!userActivity.has(userId)) {
+        userActivity.set(userId, {
+            commandCount: 0,
+            favoriteCommands: new Map(),
+            firstSeen: Date.now(),
+            lastSeen: Date.now()
+        });
+    }
+    
+    const activity = userActivity.get(userId);
+    activity.commandCount++;
+    activity.lastSeen = Date.now();
+    
+    const cmdCount = activity.favoriteCommands.get(commandName) || 0;
+    activity.favoriteCommands.set(commandName, cmdCount + 1);
+};
+
+// Cooldown system to prevent spam
+const checkCooldown = (userId, commandName) => {
+    const cooldownKey = `${userId}-${commandName}`;
+    const lastUsed = cooldowns.get(cooldownKey);
+    const cooldownTime = 3000; // 3 seconds default
+    
+    if (lastUsed && Date.now() - lastUsed < cooldownTime) {
+        return false;
+    }
+    
+    cooldowns.set(cooldownKey, Date.now());
+    return true;
+};
+
+// Enhanced command loading with hot-reload support
+export const loadCommands = async (reload = false) => {
+    const commandsPath = path.join(__dirname, '../commands');
+    console.log('Available commands:', Object.keys(commandList));
+    if (!fs.existsSync(commandsPath)) {
+        console.warn('⚠️ Commands directory not found, creating...');
+        fs.mkdirSync(commandsPath, { recursive: true });
+        return commands;
+    }
+    
+    const commandFiles = fs.readdirSync(commandsPath).filter(
+        file => file.endsWith('.js') && !file.startsWith('_')
+    );
+
+    let loadedCount = 0;
+    let errorCount = 0;
+
+    for (const file of commandFiles) {
+        const modulePath = pathToFileURL(path.join(commandsPath, file)).href;
+        const commandName = path.basename(file, '.js');
+
+        try {
+            // Clear module cache for hot-reload
+            if (reload && import.meta.url) {
+                delete require.cache[require.resolve(path.join(commandsPath, file))];
+            }
+            
+            const module = await import(`${modulePath}?t=${Date.now()}`);
+
+            if (typeof module.default === 'function') {
+                commands[commandName] = module.default;
+                loadedCount++;
+
+                // Enhanced command metadata
+                if (module.default.description) {
+                    commandDescriptions[commandName] = {
+                        description: module.default.description,
+                        usage: module.default.usage || `${process.env.PREFIX || '!'}${commandName}`,
+                        category: module.default.category || 'general',
+                        cooldown: module.default.cooldown || 3000,
+                        adminOnly: module.default.adminOnly || false,
+                        emoji: module.default.emoji || commandEmojis._default
+                    };
+                }
+
+                // Custom emoji support
+                if (module.default.emoji) {
+                    commandEmojis[commandName] = module.default.emoji;
+                }
+            } else {
+                console.warn(`⚠️ Skipping ${file}: No default export found.`);
+                errorCount++;
+            }
+        } catch (error) {
+            console.error(`❌ Failed to load command '${file}':`, error.message);
+            errorCount++;
+        }
+    }
+
+    console.log(`🚀 Loaded ${loadedCount} commands successfully${errorCount > 0 ? ` (${errorCount} errors)` : ''}`);
+    return commands;
+};
+
+// Main enhanced message handler
+export const messageHandler = async (sock, afkUsers, presenceSettings = {
+    TYPING: false,
+    AUDIO: false,
+    ALWAYS_ONLINE: false
+}, options = {}) => {
+    if (sock._messageHandlerRegistered) return;
+    sock._messageHandlerRegistered = true;
+
+    const commandList = await loadCommands();
+    const prefix = process.env.PREFIX || '!';
+    
+    console.log(`🤖 Enhanced message handler initialized with prefix: ${prefix}`);
+
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (type !== 'notify') return;
+
+        for (const msg of messages) {
+            try {
+                const from = msg.key.remoteJid;
+                const userId = msg.key.participant || from;
+                
+                if (!from || msg.key.fromMe) continue;
+
+                const text = msg.message?.conversation ||
+                    msg.message?.extendedTextMessage?.text ||
+                    msg.message?.buttonsResponseMessage?.selectedButtonId ||
+                    msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId;
+
+                if (!text) continue;
+
+                // Enhanced AFK system with better messages
+                if (afkUsers.has(from)) {
+                    const afkData = afkUsers.get(from);
+                    const timeAway = Math.floor((Date.now() - afkData.timestamp) / 1000);
+                    
+                    const timeFormat = timeAway > 3600 ? 
+                        `${Math.floor(timeAway / 3600)}h ${Math.floor((timeAway % 3600) / 60)}m` :
+                        timeAway > 60 ? `${Math.floor(timeAway / 60)}m ${timeAway % 60}s` : `${timeAway}s`;
+                    
+                    await sock.sendMessage(from, {
+                        text: `🔄 *${afkData.name}* is back!\n⏰ Was away for: ${timeFormat}\n💬 Reason: ${afkData.reason}`,
+                        react: { text: '👋', key: msg.key }
+                    });
+                    afkUsers.delete(from);
+                }
+
+                if (!text.startsWith(prefix)) continue;
+
+                const args = text.slice(prefix.length).trim().split(/ +/);
+                const commandName = args.shift().toLowerCase();
+                const command = commandList[commandName];
+
+                if (!command) {
+                    // Smart command suggestions
+                    const suggestions = Object.keys(commandList)
+                        .filter(cmd => cmd.includes(commandName) || commandName.includes(cmd))
+                        .slice(0, 3);
+                    
+                    let response = `❓ Unknown command: *${commandName}*`;
+                    if (suggestions.length > 0) {
+                        response += `\n\n💡 Did you mean:\n${suggestions.map(s => `• ${prefix}${s}`).join('\n')}`;
+                    }
+                    response += `\n\n📚 Use *${prefix}help* for all commands`;
+                    
+                    await sock.sendMessage(from, { text: response });
+                    await sock.sendMessage(from, {
+                        react: { text: '⚠️', key: msg.key }
+                    });
+                    continue;
+                }
+
+                // Check cooldown
+                if (!checkCooldown(userId, commandName)) {
+                    await sock.sendMessage(from, {
+                        text: '⏳ Please wait a moment before using this command again.',
+                        react: { text: '🕒', key: msg.key }
+                    });
+                    continue;
+                }
+
+                // Track command usage
+                trackCommandUsage(commandName, userId);
+
+                // Advanced presence handling
+                const typingDuration = await handleAdvancedPresence(sock, msg, presenceSettings, commandName);
+
+                // Show loading for complex commands
+                let loadingMsg = null;
+                const complexCommands = ['weather', 'search', 'translate', 'download'];
+                if (complexCommands.includes(commandName)) {
+                    loadingMsg = await sendLoadingMessage(sock, from, msg.key);
+                }
+
+                // Execute command with enhanced context
+                const commandContext = {
+                    sock,
+                    msg,
+                    from,
+                    args,
+                    userId,
+                    userActivity: userActivity.get(userId),
+                    greeting: smartResponder.getPersonalizedGreeting(userId),
+                    isFirstTime: !userActivity.has(userId)
+                };
+
+                // Add beforeResponse callback from options
+                if (options.beforeResponse) {
+                    const shouldContinue = await options.beforeResponse({
+                        commandName,
+                        userId,
+                        from,
+                        msg,
+                        args
+                    });
+                    if (shouldContinue === false) continue;
+                }
+
+                try {
+                    await command(commandContext.sock, commandContext.msg, commandContext.from, commandContext.args, commandContext);
+                    
+                    // Smart success reaction
+                    const reactionEmoji = getSmartReaction(commandName, true, userId);
+                    await sock.sendMessage(from, {
+                        react: { text: reactionEmoji, key: msg.key }
+                    });
+
+                    // Remember successful interaction
+                    smartResponder.rememberContext(userId, commandName, 'success');
+
+                } catch (commandError) {
+                    console.error(`💥 Command '${commandName}' failed:`, commandError);
+                    
+                    const errorReaction = getSmartReaction(commandName, false, userId);
+                    await sock.sendMessage(from, {
+                        text: `💥 Oops! Something went wrong with *${commandName}*\n🔧 Please try again later.`,
+                        react: { text: errorReaction, key: msg.key }
+                    });
+                }
+
+                // Clean up loading message
+                if (loadingMsg) {
+                    setTimeout(async () => {
+                        try {
+                            await sock.sendMessage(from, {
+                                delete: loadingMsg.key
+                            });
+                        } catch (e) {
+                            // Ignore cleanup errors
+                        }
+                    }, 1000);
+                }
+
+            } catch (err) {
+                console.error('⚠️ Message handler error:', err);
+                
+                try {
+                    const from = msg?.key?.remoteJid;
+                    if (from) {
+                        await sock.sendMessage(from, {
+                            react: { text: '💥', key: msg.key }
+                        });
+                    }
+                } catch (e) {
+                    console.error('Failed to send error reaction:', e);
+                }
+            }
+        }
+    });
+
+    // Set up hot-reload for development
+    if (process.env.NODE_ENV === 'development') {
+        const commandsPath = path.join(__dirname, '../commands');
+        if (fs.existsSync(commandsPath)) {
+            fs.watch(commandsPath, async (eventType, filename) => {
+                if (filename && filename.endsWith('.js')) {
+                    console.log(`🔄 Reloading commands due to ${filename} change...`);
+                    await loadCommands(true);
+                }
+            });
+        }
+    }
+};
+
+// Export enhanced utilities
+export const commandMap = commands;
+export const getCommandStats = () => Object.fromEntries(commandStats);
+export const getUserActivity = (userId) => userActivity.get(userId);
+export const getAllUserActivity = () => Object.fromEntries(userActivity);
+
+// Admin utilities
+export const adminUtils = {
+    getTopCommands: (limit = 10) => {
+        return Array.from(commandStats.entries())
+            .sort(([,a], [,b]) => b - a)
+            .slice(0, limit);
+    },
+    
+    getActiveUsers: (limit = 10) => {
+        return Array.from(userActivity.entries())
+            .sort(([,a], [,b]) => b.commandCount - a.commandCount)
+            .slice(0, limit);
+    },
+    
+    resetStats: () => {
+        commandStats.clear();
+        userActivity.clear();
+        cooldowns.clear();
+        console.log('📊 All stats have been reset');
+    }
+};

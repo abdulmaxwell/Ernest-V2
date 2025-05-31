@@ -4,7 +4,7 @@ data
 package-lock.json
 # Environment variables
 comand.txt
-
+commandshow.txt
 # Logs
 *.log
 logs/

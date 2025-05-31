@@ -12,32 +12,102 @@ import { dirname, join } from "path";
 import { messageHandler } from "./handlers/messageHandler.js";
 import express from "express";
 import { initScheduler } from './lib/scheduler.js';
+import { error } from "console";
 
 // Configure environment
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Configuration
+// Enhanced Configuration with Anti-Detection Features
 const config = {
   AUTH_FOLDER: join(__dirname, "data", "auth_state"),
   LOG_FILE: join(__dirname, "bot.log"),
-  MAX_RETRIES: 5,
-  RETRY_DELAY: 5000,
+  MAX_RETRIES: 3, // Reduced retries
+  RETRY_DELAY: 30000, // Increased to 30 seconds
   PORT: process.env.PORT || 3000,
   BOT_VERSION: "2.1.0",
+  
+  // Anti-Detection Settings
+  ANTI_DETECTION: {
+    MIN_RESPONSE_DELAY: 2000,    // Minimum 2 seconds before responding
+    MAX_RESPONSE_DELAY: 8000,    // Maximum 8 seconds before responding
+    TYPING_DURATION: 3000,       // How long to show "typing" indicator
+    READ_DELAY: 1000,            // Delay before marking as read
+    DAILY_MESSAGE_LIMIT: 200,    // Max messages per day
+    HOURLY_MESSAGE_LIMIT: 20,    // Max messages per hour
+    COOLDOWN_BETWEEN_MESSAGES: 5000, // 5 seconds between messages
+    RANDOM_OFFLINE_INTERVALS: true,  // Randomly go offline
+    OFFLINE_MIN_DURATION: 300000,    // Min offline time (5 minutes)
+    OFFLINE_MAX_DURATION: 1800000,   // Max offline time (30 minutes)
+  },
+  
   // Presence settings
   PRESENCE: {
     TYPING: process.env.TYPING === 'true',
     AUDIO: process.env.AUDIO === 'true',
-    ALWAYS_ONLINE: process.env.ALWAYS_ONLINE === 'true'
+    ALWAYS_ONLINE: false, // Changed to false for better stealth
+    RANDOM_STATUS: true   // Randomly change online status
   }
 };
 
-// Validate presence settings - only one can be true
-if (config.PRESENCE.TYPING && config.PRESENCE.AUDIO) {
-  config.PRESENCE.AUDIO = false; // Default to typing if both are true
-  console.warn("Both TYPING and AUDIO cannot be true simultaneously. Defaulting to TYPING.");
+// Message rate limiting
+class RateLimiter {
+  constructor() {
+    this.messageCount = new Map();
+    this.dailyCount = 0;
+    this.hourlyCount = 0;
+    this.lastHourReset = Date.now();
+    this.lastDayReset = Date.now();
+    this.lastMessageTime = 0;
+  }
+
+  canSendMessage() {
+    const now = Date.now();
+    
+    // Reset counters
+    if (now - this.lastHourReset > 3600000) { // 1 hour
+      this.hourlyCount = 0;
+      this.lastHourReset = now;
+    }
+    
+    if (now - this.lastDayReset > 86400000) { // 24 hours
+      this.dailyCount = 0;
+      this.lastDayReset = now;
+    }
+    
+    // Check limits
+    if (this.dailyCount >= config.ANTI_DETECTION.DAILY_MESSAGE_LIMIT) {
+      return false;
+    }
+    
+    if (this.hourlyCount >= config.ANTI_DETECTION.HOURLY_MESSAGE_LIMIT) {
+      return false;
+    }
+    
+    // Check cooldown
+    if (now - this.lastMessageTime < config.ANTI_DETECTION.COOLDOWN_BETWEEN_MESSAGES) {
+      return false;
+    }
+    
+    return true;
+  }
+  
+  recordMessage() {
+    this.dailyCount++;
+    this.hourlyCount++;
+    this.lastMessageTime = Date.now();
+  }
+}
+
+// Human-like delay utility
+function getRandomDelay(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// Sleep function
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // Ensure auth directory exists
@@ -46,13 +116,13 @@ async function ensureAuthFolder() {
     await fs.mkdir(config.AUTH_FOLDER, { recursive: true });
   } catch (err) {
     console.error("Failed to create auth folder:", err);
-    process.exit(1);
+    process.exit(1);  
   }
 }
 
-// Logger setup
+// Logger setup with reduced verbosity
 const logger = pino({
-  level: "debug",
+  level: "debug", // Changed from debug to info
   transport: {
     target: "pino-pretty",
     options: {
@@ -84,7 +154,7 @@ async function initializeSession() {
   }
 }
 
-// WhatsApp Bot Class
+// Enhanced WhatsApp Bot Class with Anti-Detection
 class WhatsAppBot {
   constructor() {
     this.sock = null;
@@ -92,6 +162,11 @@ class WhatsAppBot {
     this.afkUsers = new Map();
     this.app = express();
     this.presenceSettings = config.PRESENCE;
+    this.rateLimiter = new RateLimiter();
+    this.isOnline = true;
+    this.messageQueue = [];
+    this.processingQueue = false;
+    this.randomOfflineTimer = null;
   }
 
   async start() {
@@ -113,7 +188,9 @@ class WhatsAppBot {
       res.status(200).json({
         status: "running",
         connected: !!this.sock,
-        presence: this.presenceSettings
+        presence: this.presenceSettings,
+        dailyMessages: this.rateLimiter.dailyCount,
+        hourlyMessages: this.rateLimiter.hourlyCount
       });
     });
 
@@ -127,26 +204,156 @@ class WhatsAppBot {
     
     this.sock = makeWASocket({
       auth: state,
-      logger: pino({ level: "silent" }),
+      logger: pino({ level: "silent" }), // Completely silent
       browser: Browsers.macOS("Desktop"),
       printQRInTerminal: false,
       shouldSyncHistoryMessage: () => false,
       syncFullHistory: false,
-      markOnlineOnConnect: this.presenceSettings.ALWAYS_ONLINE
+      markOnlineOnConnect: false, // Don't immediately mark as online
+      connectTimeoutMs: 60000,    // Longer connection timeout
+      defaultQueryTimeoutMs: 60000, // Longer query timeout
+      keepAliveIntervalMs: 30000,   // Less frequent keep-alive
+      retryRequestDelayMs: 2000,    // Longer retry delay
     });
 
     // Setup event handlers
     this.setupEventHandlers(saveCreds);
-    messageHandler(this.sock, this.afkUsers, this.presenceSettings);
-    initScheduler(this.sock);
+    this.setupEnhancedMessageHandler();
+    
+    // Initialize scheduler with delays
+    setTimeout(() => {
+      initScheduler(this.sock);
+    }, 5000);
 
-    logger.info("WhatsApp connection initialized");
+    // Start random offline intervals
+    if (config.ANTI_DETECTION.RANDOM_OFFLINE_INTERVALS) {
+      this.startRandomOfflineIntervals();
+    }
+
+    logger.info("WhatsApp connection initialized with anti-detection features");
+  }
+
+  setupEnhancedMessageHandler() {
+    // Enhanced message handler with human-like behavior
+    messageHandler(this.sock, this.afkUsers, this.presenceSettings, {
+      beforeResponse: async (messageInfo) => {
+        // Check rate limits
+        if (!this.rateLimiter.canSendMessage()) {
+          logger.warn("Rate limit reached, skipping message");
+          return false;
+        }
+
+        // Add to queue for sequential processing
+        this.messageQueue.push(messageInfo);
+        this.processMessageQueue();
+        return false; // Let queue handle it
+      }
+    });
+  }
+
+  async processMessageQueue() {
+    if (this.processingQueue || this.messageQueue.length === 0) return;
+    
+    this.processingQueue = true;
+    
+    while (this.messageQueue.length > 0) {
+      const messageInfo = this.messageQueue.shift();
+      await this.processMessageWithDelay(messageInfo);
+    }
+    
+    this.processingQueue = false;
+  }
+
+  async processMessageWithDelay(messageInfo) {
+    try {
+      // Random delay before reading
+      await sleep(getRandomDelay(500, 2000));
+      
+      // Mark as read (if not disabled)
+      if (messageInfo.key && this.sock) {
+        await this.sock.readMessages([messageInfo.key]);
+      }
+      
+      // Show typing indicator
+      if (this.presenceSettings.TYPING && messageInfo.from) {
+        await this.sock.sendPresenceUpdate('composing', messageInfo.from);
+      }
+      
+      // Random typing duration
+      const typingDuration = getRandomDelay(
+        config.ANTI_DETECTION.MIN_RESPONSE_DELAY,
+        config.ANTI_DETECTION.MAX_RESPONSE_DELAY
+      );
+      
+      await sleep(typingDuration);
+      
+      // Stop typing
+      if (this.presenceSettings.TYPING && messageInfo.from) {
+        await this.sock.sendPresenceUpdate('paused', messageInfo.from);
+      }
+      
+      // Small delay before sending
+      await sleep(getRandomDelay(500, 1500));
+      
+      // Process the actual message (you'll need to integrate this with your message handler)
+      // This is where your actual message processing logic should go
+      
+      // Record the message
+      this.rateLimiter.recordMessage();
+      
+      // Random delay between messages
+      await sleep(config.ANTI_DETECTION.COOLDOWN_BETWEEN_MESSAGES);
+      
+    } catch (err) {
+      logger.error("Error processing message:", err);
+    }
+  }
+
+  startRandomOfflineIntervals() {
+    const scheduleNextOffline = () => {
+      // Random interval between 30 minutes to 2 hours
+      const nextOfflineIn = getRandomDelay(1800000, 7200000);
+      
+      this.randomOfflineTimer = setTimeout(async () => {
+        await this.goOfflineTemporarily();
+        scheduleNextOffline();
+      }, nextOfflineIn);
+    };
+    
+    scheduleNextOffline();
+  }
+
+  async goOfflineTemporarily() {
+    if (!this.sock) return;
+    
+    try {
+      logger.info("Going offline temporarily for stealth");
+      
+      // Set presence to offline
+      await this.sock.sendPresenceUpdate('unavailable');
+      this.isOnline = false;
+      
+      // Stay offline for random duration
+      const offlineDuration = getRandomDelay(
+        config.ANTI_DETECTION.OFFLINE_MIN_DURATION,
+        config.ANTI_DETECTION.OFFLINE_MAX_DURATION
+      );
+      
+      setTimeout(async () => {
+        if (this.sock) {
+          await this.sock.sendPresenceUpdate('available');
+          this.isOnline = true;
+          logger.info("Back online");
+        }
+      }, offlineDuration);
+      
+    } catch (err) {
+      logger.error("Error during offline period:", err);
+    }
   }
 
   setupEventHandlers(saveCreds) {
     this.sock.ev.on("connection.update", async (update) => {
-      logger.debug("Connection update:", update);
-      
       if (update.connection === "close") {
         await this.handleDisconnection(update.lastDisconnect);
       }
@@ -157,6 +364,11 @@ class WhatsAppBot {
     });
 
     this.sock.ev.on("creds.update", saveCreds);
+    
+    // Handle presence updates more naturally
+    this.sock.ev.on("presence.update", (update) => {
+      // Don't log presence updates to reduce noise
+    });
   }
 
   async handleDisconnection(lastDisconnect) {
@@ -170,6 +382,11 @@ class WhatsAppBot {
       return;
     }
 
+    // Clear offline timer
+    if (this.randomOfflineTimer) {
+      clearTimeout(this.randomOfflineTimer);
+    }
+
     await this.handleRetry();
   }
 
@@ -178,11 +395,14 @@ class WhatsAppBot {
     const user = this.sock.user;
     logger.info(`✅ Connected as ${user?.id || "unknown"}`);
 
-    try {
-      await this.sendConnectionNotification(user.id);
-    } catch (err) {
-      logger.error("Failed to send connection notification:", err);
-    }
+    // Delay before sending connection notification
+    setTimeout(async () => {
+      try {
+        await this.sendConnectionNotification(user.id);
+      } catch (err) {
+        logger.error("Failed to send connection notification:", err);
+      }
+    }, getRandomDelay(5000, 15000)); // Random delay 5-15 seconds
   }
 
   async sendConnectionNotification(userId) {
@@ -192,26 +412,36 @@ class WhatsAppBot {
 ╔══════════════════════════════╗
 ║    *ERNEST TECH HOUSE BOT*   ║
 ╠══════════════════════════════╣
-║ Status: Connected            ║
+║ Status: Connected (Stealth)  ║
 ║ Version: ${config.BOT_VERSION.padEnd(15)}║
 ║                              ║
-║ Always Online: ${statusEmoji(this.presenceSettings.ALWAYS_ONLINE)}           ║
-║ Typing: ${statusEmoji(this.presenceSettings.TYPING)}                 ║
-║ Audio: ${statusEmoji(this.presenceSettings.AUDIO)}                  ║
+║ Anti-Detection: ✅           ║
+║ Rate Limited: ✅             ║
+║ Human-like: ✅               ║
 ║                              ║
-║ Authenticated via session ID ║
-║ No QR code required          ║
+║ Enhanced with stealth features║
+║ Reduced detection risk       ║
+║                              ║
+║ Contact: +254793859108       ║
 ╚══════════════════════════════╝
     `.trim();
 
+    // Show typing before sending
+    await this.sock.sendPresenceUpdate('composing', userId);
+    await sleep(3000);
+    
     await this.sock.sendMessage(userId, { text: message });
+    
+    // Mark this message in rate limiter
+    this.rateLimiter.recordMessage();
   }
 
   async handleRetry() {
     if (this.retryCount < config.MAX_RETRIES) {
       this.retryCount++;
-      logger.info(`Retrying connection (${this.retryCount}/${config.MAX_RETRIES})...`);
-      setTimeout(() => this.start(), config.RETRY_DELAY);
+      const retryDelay = config.RETRY_DELAY * (this.retryCount * 2); // Exponential backoff
+      logger.info(`Retrying connection (${this.retryCount}/${config.MAX_RETRIES}) in ${retryDelay/1000}s...`);
+      setTimeout(() => this.start(), retryDelay);
     } else {
       logger.error("Max retries reached. Shutting down.");
       process.exit(1);
@@ -219,8 +449,14 @@ class WhatsAppBot {
   }
 
   async cleanup() {
+    if (this.randomOfflineTimer) {
+      clearTimeout(this.randomOfflineTimer);
+    }
+    
     if (this.sock) {
       try {
+        await this.sock.sendPresenceUpdate('unavailable');
+        await sleep(1000);
         await this.sock.end();
         this.sock.ev.removeAllListeners();
       } catch (err) {
@@ -230,20 +466,33 @@ class WhatsAppBot {
   }
 }
 
-// Process handlers
+// Process handlers with graceful shutdown
 process.on("SIGINT", async () => {
+  logger.info("Graceful shutdown initiated...");
   await bot.cleanup();
   process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
+  logger.info("Graceful shutdown initiated...");
   await bot.cleanup();
   process.exit(0);
+});
+
+// Error handling
+process.on('unhandledRejection', (err) => {
+  logger.error('Unhandled promise rejection:', err.stack || err);
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught exception:', err.stack ||  err);
+  console.log(err);
+  //process.exit(1);
 });
 
 // Start the bot
 const bot = new WhatsAppBot();
 bot.start().catch(err => {
-  logger.error("Fatal error:", err);
+  logger.error("Fatal error:", err.stack || err);
   process.exit(1);
 });

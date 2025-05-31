@@ -3,105 +3,116 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import dotenv from 'dotenv';
 
-dotenv.config(); // Load .env vars
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const commands = {}; // Command execution functions
-export const commandDescriptions = {}; // Optional metadata like descriptions
+// Core data structures
+const commands = {};
+export const commandDescriptions = {};
+const cooldowns = new Map();
+const userActivity = new Map();
 
-// Emoji map for different command categories
+// Enhanced emoji system (simplified)
 const commandEmojis = {
-    // System commands
-    'help': 'ℹ️',
-    'ping': '🏓',
-    'info': '📊',
+    // System
+    'help': 'ℹ️', 'ping': '🏓', 'info': '📊',
     
-    // Moderation commands
-    'ban': '🔨',
-    'kick': '👢',
-    'mute': '🔇',
+    // Moderation
+    'ban': '🔨', 'kick': '👢', 'mute': '🔇',
     
-    // Fun commands
-    'joke': '😂',
-    'meme': '🖼️',
-    'quote': '💬',
+    // Fun
+    'joke': '😂', 'meme': '🖼️', 'quote': '💬',
     
-    // Utility commands
-    'weather': '☀️',
-    'time': '🕒',
-    'calc': '🧮',
+    // Utility
+    'weather': '☀️', 'time': '🕒', 'calc': '🧮',
     
-    // Default fallback
-    '_default': '✅'
+    // Reactions
+    '_success': '✅', '_error': '❌', '_default': '✨'
 };
 
-// Dynamically load commands
+// Simplified command loader
 export const loadCommands = async () => {
     const commandsPath = path.join(__dirname, '../commands');
-    const commandFiles = fs.readdirSync(commandsPath).filter(
-        file => file.endsWith('.js') && !file.startsWith('_')
-    );
+    
+    if (!fs.existsSync(commandsPath)) {
+        console.warn('⚠️ Commands directory not found');
+        return commands;
+    }
+
+    const commandFiles = fs.readdirSync(commandsPath)
+        .filter(file => file.endsWith('.js') && !file.startsWith('_'));
 
     for (const file of commandFiles) {
-        const modulePath = pathToFileURL(path.join(commandsPath, file)).href;
+        const commandName = path.basename(file, '.js');
+        const modulePath = pathToFileURL(path.join(commandsPath, file));
 
         try {
             const module = await import(modulePath);
-            const commandName = path.basename(file, '.js');
-
+            
             if (typeof module.default === 'function') {
                 commands[commandName] = module.default;
-
+                
+                // Store metadata if provided
                 if (module.default.description) {
-                    commandDescriptions[commandName] = module.default.description;
+                    commandDescriptions[commandName] = {
+                        description: module.default.description,
+                        usage: module.default.usage || `${process.env.PREFIX || '!'}${commandName}`,
+                        emoji: module.default.emoji || commandEmojis._default
+                    };
                 }
-
-                // Allow commands to specify their own emoji
-                if (module.default.emoji) {
-                    commandEmojis[commandName] = module.default.emoji;
-                }
-            } else {
-                console.warn(`Skipping ${file}: No default export found.`);
+                
+                console.log(`✅ Loaded command: ${commandName}`);
             }
         } catch (error) {
-            console.error(`❌ Failed to load command '${file}':`, error);
+            console.error(`❌ Failed to load ${file}:`, error.message);
         }
     }
 
     return commands;
 };
 
-// Presence management functions
-const handlePresence = async (sock, msg, presenceSettings) => {
-    if (!presenceSettings.TYPING && !presenceSettings.AUDIO) return;
-
-    const from = msg.key.remoteJid;
-    const presenceType = presenceSettings.AUDIO ? 'recording' : 'composing';
-
+// Smart presence management (simplified)
+const handlePresence = async (sock, from, commandName) => {
     try {
-        // Show typing/recording indicator
-        await sock.sendPresenceUpdate(presenceType, from);
+        // Only show presence for complex commands
+        const complexCommands = ['weather', 'search', 'translate'];
+        if (!complexCommands.includes(commandName)) return;
+
+        await sock.sendPresenceUpdate('composing', from);
         
-        // Hide the indicator after 3 seconds
+        // Hide after random delay (1-3s)
         setTimeout(async () => {
             try {
                 await sock.sendPresenceUpdate('paused', from);
             } catch (error) {
                 console.error('Error hiding presence:', error);
             }
-        }, 3000);
+        }, 1000 + Math.random() * 2000);
     } catch (error) {
-        console.error('Error setting presence:', error);
+        console.error('Presence error:', error);
     }
 };
 
-// Main message handler
+// Cooldown system (essential)
+const checkCooldown = (userId, commandName) => {
+    const cooldownKey = `${userId}-${commandName}`;
+    const lastUsed = cooldowns.get(cooldownKey) || 0;
+    const cooldownTime = 3000; // 3 seconds
+
+    if (Date.now() - lastUsed < cooldownTime) {
+        return false;
+    }
+
+    cooldowns.set(cooldownKey, Date.now());
+    return true;
+};
+
+// Enhanced but simple message handler
 export const messageHandler = async (sock, afkUsers, presenceSettings = {
-    TYPING: false,
-    AUDIO: false,
-    ALWAYS_ONLINE: false
+    TYPING: true,
+    AUDIO: false
 }) => {
     if (sock._messageHandlerRegistered) return;
     sock._messageHandlerRegistered = true;
@@ -109,80 +120,88 @@ export const messageHandler = async (sock, afkUsers, presenceSettings = {
     const commandList = await loadCommands();
     const prefix = process.env.PREFIX || '!';
 
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return;
+    console.log(`🤖 Handler ready with prefix "${prefix}" (${Object.keys(commandList).length} commands)`);
 
+    sock.ev.on('messages.upsert', async ({ messages }) => {
         for (const msg of messages) {
+            const from = msg.key.remoteJid;
+            if (!from || msg.key.fromMe) continue;
+
             try {
-                const from = msg.key.remoteJid;
-                if (!from) continue;
+                const text = msg.message?.conversation || 
+                           msg.message?.extendedTextMessage?.text || 
+                           '';
 
-                const text = msg.message?.conversation ||
-                    msg.message?.extendedTextMessage?.text ||
-                    msg.message?.buttonsResponseMessage?.selectedButtonId;
-
-                if (!text) continue;
-
-                // Handle AFK users first
-                if (afkUsers.has(from)) {
+                // Handle AFK users
+                if (afkUsers.has(from) && text.startsWith(prefix)) {
                     const afkData = afkUsers.get(from);
                     const timeAway = Math.floor((Date.now() - afkData.timestamp) / 1000);
                     await sock.sendMessage(from, {
-                        text: `*${afkData.name}* is currently AFK (${timeAway}s ago)\nReason: ${afkData.reason}`
+                        text: `⏳ ${afkData.name} is AFK (${timeAway}s)\n💬 Reason: ${afkData.reason}`
                     });
                     afkUsers.delete(from);
                 }
 
                 if (!text.startsWith(prefix)) continue;
 
-                // Handle presence indicators if enabled
-                await handlePresence(sock, msg, presenceSettings);
-
                 const args = text.slice(prefix.length).trim().split(/ +/);
                 const commandName = args.shift().toLowerCase();
                 const command = commandList[commandName];
 
-                if (command) {
-                    await command(sock, msg, from, args);
-                    
-                    // Get appropriate emoji for this command
-                    const reactionEmoji = commandEmojis[commandName] || 
-                                       (command.emoji ? command.emoji : commandEmojis._default);
-                    
-                    // React to the command message
+                if (!command) {
                     await sock.sendMessage(from, {
-                        react: {
-                            text: reactionEmoji,
-                            key: msg.key
-                        }
+                        react: { text: '⚠️', key: msg.key }
                     });
-                } else {
-                    console.log(`🚫 Unknown command: ${commandName}`);
-                    // React with warning emoji for unknown commands
-                    await sock.sendMessage(from, {
-                        react: {
-                            text: '⚠️',
-                            key: msg.key
-                        }
-                    });
+                    return;
                 }
-            } catch (err) {
-                console.error('⚠️ Error handling message:', err);
-                // React with error emoji if something fails
+
+                // Check cooldown
+                const userId = msg.key.participant || from;
+                if (!checkCooldown(userId, commandName)) {
+                    await sock.sendMessage(from, {
+                        text: '⏳ Please wait before using this command again',
+                        react: { text: '🕒', key: msg.key }
+                    });
+                    return;
+                }
+
+                // Track activity
+                userActivity.set(userId, {
+                    lastCommand: commandName,
+                    timestamp: Date.now()
+                });
+
+                // Handle presence
+                if (presenceSettings.TYPING) {
+                    await handlePresence(sock, from, commandName);
+                }
+
+                // Execute command
+                await command(sock, msg, from, args);
+
+                // Send success reaction
+                const emoji = commandDescriptions[commandName]?.emoji || commandEmojis._success;
+                await sock.sendMessage(from, {
+                    react: { text: emoji, key: msg.key }
+                });
+
+            } catch (error) {
+                console.error(`💥 Command error:`, error.stack || error);
+                
                 try {
                     await sock.sendMessage(from, {
-                        react: {
-                            text: '❌',
-                            key: msg.key
-                        }
+                        react: { text: commandEmojis._error, key: msg.key },
+                        text: `❌ Error executing command: ${error.message}`
                     });
                 } catch (e) {
-                    console.error('Failed to send error reaction:', e);
+                    console.error('Failed to send error:', e);
                 }
             }
         }
     });
 };
 
-// Export the full command map
+// Export utilities
 export const commandMap = commands;
+export const getCooldowns = () => Object.fromEntries(cooldowns);
+export const getActivity = () => Object.fromEntries(userActivity);
