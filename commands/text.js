@@ -14,14 +14,37 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Load identity mappings from JSON file
+function loadIdentityMappings() {
+    try {
+        const identityPath = path.join(process.cwd(), 'identities.json');
+        if (!fs.existsSync(identityPath)) {
+            // Create default file if it doesn't exist
+            const defaultMappings = {
+                "1234": "1234567890@s.whatsapp.net",
+                "admin": "0987654321@s.whatsapp.net",
+                "test": "1111111111@s.whatsapp.net"
+            };
+            fs.writeFileSync(identityPath, JSON.stringify(defaultMappings, null, 2));
+            return defaultMappings;
+        }
+        
+        const data = fs.readFileSync(identityPath, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        console.error('Error loading identity mappings:', error);
+        return {};
+    }
+}
+
 // Animated loading messages
 const loadingMessages = [
-    '🚀 Initializing broadcast system...',
-    '📡 Connecting to satellite networks...',
-    '🌍 Reaching contacts across the globe...',
-    '⚡ Powering up transmission array...',
-    '🎯 Locking onto target recipients...',
-    '💫 Preparing for mass deployment...'
+    '🚀 Initializing targeted messaging...',
+    '📡 Connecting to secure channels...',
+    '🎯 Locating target recipient...',
+    '⚡ Establishing encrypted connection...',
+    '🌍 Routing through global network...',
+    '💫 Preparing secure transmission...'
 ];
 
 // Success animations
@@ -33,90 +56,13 @@ const getRandomLoading = () => loadingMessages[Math.floor(Math.random() * loadin
 // Get random success emoji
 const getRandomSuccess = () => successEmojis[Math.floor(Math.random() * successEmojis.length)];
 
-// Create awesome progress bar
-const createProgressBar = (current, total, width = 20) => {
-    const percentage = Math.round((current / total) * 100);
-    const filledWidth = Math.round((current / total) * width);
-    const emptyWidth = width - filledWidth;
-    
-    const filled = '█'.repeat(filledWidth);
-    const empty = '░'.repeat(emptyWidth);
-    
-    return `[${filled}${empty}] ${percentage}%`;
-};
-
-// Generate broadcast stats
-const generateStats = (sent, failed, total, startTime) => {
-    const endTime = Date.now();
-    const duration = ((endTime - startTime) / 1000).toFixed(1);
-    const successRate = ((sent / total) * 100).toFixed(1);
-    
-    return `
-╔══════════════════════════════════════╗
-║           📊 BROADCAST STATS         ║
-╠══════════════════════════════════════╣
-║ 📤 Messages Sent: ${sent.toString().padStart(15)} ║
-║ ❌ Failed Sends:  ${failed.toString().padStart(15)} ║
-║ 📊 Success Rate:  ${successRate.padStart(13)}% ║
-║ ⏱️  Duration:     ${duration.padStart(12)}s ║
-║ 🎯 Total Targets: ${total.toString().padStart(15)} ║
-╚══════════════════════════════════════╝
-    `.trim();
-};
-
 export default async function text(sock, msg, from) {
     const startTime = Date.now();
     
     try {
-        // 🔐 SECURITY CHECK
-        const ownerNumber = (process.env.OWNER_NUMBER || '').trim();
-        if (!ownerNumber) {
-            return await sock.sendMessage(from, {
-                text: `
-🚨 *SYSTEM ERROR* 🚨
-
-⚠️ Owner verification failed!
-🔧 OWNER_NUMBER not configured in .env
-
-Contact system administrator immediately! 🔧
-                `.trim(),
-            }, { quoted: msg });
-        }
-
-        const senderNumber = msg.key.remoteJid.split('@')[0];
-        if (senderNumber !== ownerNumber) {
-            return await sock.sendMessage(from, {
-                text: `
-🚫 *ACCESS DENIED* 🚫
-
-⛔ Unauthorized broadcast attempt detected!
-👤 Only the supreme commander can use this weapon!
-
-🔐 Nice try, but this is owner-only territory! 😎
-                `.trim(),
-            }, { quoted: msg });
-        }
-
-        // 📡 TARGET ACQUISITION
-        const specialNumbers = (process.env.SPECIAL_NUMBERS || '')
-            .split(',')
-            .map(n => n.trim())
-            .filter(n => n)
-            .map(n => n.includes('@') ? n : `${n}@s.whatsapp.net`);
-
-        if (!specialNumbers.length) {
-            return await sock.sendMessage(from, {
-                text: `
-🎯 *TARGET ACQUISITION FAILED* 🎯
-
-⚠️ No special numbers detected in database!
-📝 Please configure SPECIAL_NUMBERS in .env
-
-Format: SPECIAL_NUMBERS=1234567890,0987654321
-                `.trim(),
-            }, { quoted: msg });
-        }
-
+        // Load identity mappings
+        const identityMappings = loadIdentityMappings();
+        
         // 💬 MESSAGE PROCESSING
         const messageText = msg.message?.conversation || 
                           msg.message?.extendedTextMessage?.text || 
@@ -127,38 +73,86 @@ Format: SPECIAL_NUMBERS=1234567890,0987654321
         if (!isTextCommand) {
             return await sock.sendMessage(from, {
                 text: `
-🎮 *COMMAND CENTER* 🎮
+🎮 *SECURE MESSAGING CENTER* 🎮
 
 ❌ Invalid command syntax detected!
 
 📝 *Correct Usage:*
-   • !text your_message
-   • Reply to any message + !text
-   • .text your_message
+   • !text [identity] your_message
+   • Reply to any message + !text [identity]
+   • .text [identity] your_message
 
 🎯 *Examples:*
-   • !text Hello everyone! 👋
-   • (Reply to image) + !text
-   • .text Check this out! 🔥
+   • !text 1234 Hello there! 👋
+   • !text admin Check this out! 🔥
+   • (Reply to image) + !text 1234
 
-💡 Pro tip: You can broadcast ANY type of message!
+🔑 *Available Identities:*
+${Object.keys(identityMappings).map(key => `   • ${key}`).join('\n')}
+
+💡 Pro tip: You can send ANY type of message!
                 `.trim(),
             }, { quoted: msg });
         }
 
-        const textBody = messageText.replace(/^[.!]text/, '').trim();
+        // Parse command: .text [identity] [message]
+        const commandText = messageText.replace(/^[.!]text/, '').trim();
+        const commandParts = commandText.split(' ');
+        const targetIdentity = commandParts[0];
+        const messageBody = commandParts.slice(1).join(' ');
+        
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        if (!quotedMsg && !textBody) {
+        // Check if identity is provided
+        if (!targetIdentity) {
             return await sock.sendMessage(from, {
                 text: `
-🎯 *BROADCAST LAUNCHER* 🎯
+🎯 *TARGET SELECTOR* 🎯
 
-❌ No payload detected!
+❌ No target identity specified!
 
 📤 *How to use:*
-   1️⃣ Type: !text your_message
-   2️⃣ OR reply to any message with !text
+   Format: !text [identity] [message]
+
+🔑 *Available Identities:*
+${Object.keys(identityMappings).map(key => `   • ${key}`).join('\n')}
+
+🚀 *Examples:*
+   • !text 1234 Hello there!
+   • !text admin Important update
+                `.trim(),
+            }, { quoted: msg });
+        }
+
+        // Resolve identity to actual number
+        const targetNumber = identityMappings[targetIdentity];
+        
+        if (!targetNumber) {
+            return await sock.sendMessage(from, {
+                text: `
+🚫 *IDENTITY NOT FOUND* 🚫
+
+❌ Identity "${targetIdentity}" not recognized!
+
+🔑 *Available Identities:*
+${Object.keys(identityMappings).map(key => `   • ${key}`).join('\n')}
+
+💡 Tip: Check your identities.json file to add new contacts!
+                `.trim(),
+            }, { quoted: msg });
+        }
+
+        // Check if we have content to send
+        if (!quotedMsg && !messageBody) {
+            return await sock.sendMessage(from, {
+                text: `
+🎯 *MESSAGE COMPOSER* 🎯
+
+❌ No message content detected!
+
+📤 *Options:*
+   1️⃣ Type: !text ${targetIdentity} your_message
+   2️⃣ Reply to any message with: !text ${targetIdentity}
 
 🚀 *Supported content:*
    • 📝 Text messages
@@ -168,7 +162,7 @@ Format: SPECIAL_NUMBERS=1234567890,0987654321
    • 📄 Documents
    • 🎭 Stickers
 
-Ready to broadcast to ${specialNumbers.length} contacts! 📡
+Ready to send to: ${targetIdentity} 📡
                 `.trim(),
             }, { quoted: msg });
         }
@@ -176,168 +170,156 @@ Ready to broadcast to ${specialNumbers.length} contacts! 📡
         // 🚀 LAUNCH SEQUENCE INITIATED
         const launchMsg = await sock.sendMessage(from, {
             text: `
-🚀 *BROADCAST SYSTEM ACTIVATED* 🚀
+🚀 *SECURE TRANSMISSION INITIATED* 🚀
 
 ${getRandomLoading()}
 
-📊 Targets: ${specialNumbers.length}
-⚡ Status: INITIALIZING...
-${createProgressBar(0, specialNumbers.length)}
+🎯 Target: ${targetIdentity}
+📱 Number: ${targetNumber.replace('@s.whatsapp.net', '')}
+⚡ Status: ESTABLISHING CONNECTION...
 
-Stand by for transmission... 💫
+Preparing secure transmission... 💫
             `.trim(),
         }, { quoted: msg });
 
-        const footer = `\n\n🤖 *Delivered by Ernest v2 Broadcast System*\n⚡ Sent: ${new Date().toLocaleString()}\n🚀 *Powered by advanced AI technology*`;
+        const footer = `\n\n🤖 *Delivered by Ernest v2 Secure Messenger*\n⚡ Sent: ${new Date().toLocaleString()}\n🔐 *Encrypted & Verified*`;
 
-        let sentCount = 0;
-        let failedCount = 0;
-
-        // 📡 TRANSMISSION LOOP
-        for (let i = 0; i < specialNumbers.length; i++) {
-            const number = specialNumbers[i];
-            const progress = i + 1;
-            
-            try {
-                // Update progress every few sends
-                if (i % 2 === 0 || i === specialNumbers.length - 1) {
-                    await sock.sendMessage(from, {
-                        text: `
-🚀 *BROADCASTING IN PROGRESS* 🚀
+        try {
+            // Update status
+            await sock.sendMessage(from, {
+                text: `
+🚀 *TRANSMISSION IN PROGRESS* 🚀
 
 ${getRandomLoading()}
 
-📊 Progress: ${progress}/${specialNumbers.length}
-⚡ Status: TRANSMITTING...
-${createProgressBar(progress, specialNumbers.length)}
+🎯 Target: ${targetIdentity}
+📱 Number: ${targetNumber.replace('@s.whatsapp.net', '')}
+⚡ Status: SENDING MESSAGE...
 
-${getRandomSuccess()} Sending to contact ${progress}...
-                        `.trim(),
-                        edit: launchMsg.key
+${getRandomSuccess()} Processing content...
+                `.trim(),
+                edit: launchMsg.key
+            });
+
+            if (quotedMsg) {
+                const contentType = getContentType(quotedMsg);
+                
+                if (contentType === 'conversation' || contentType === 'extendedTextMessage') {
+                    // 📝 Text message with style
+                    const quotedText = quotedMsg.conversation || quotedMsg.extendedTextMessage?.text;
+                    await sock.sendMessage(targetNumber, {
+                        text: `📢 *SECURE MESSAGE* 📢\n\n${quotedText}${footer}`
                     });
-                }
-
-                if (quotedMsg) {
-                    const contentType = getContentType(quotedMsg);
+                } 
+                else if (['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage'].includes(contentType)) {
+                    // 📸 Media message handling
+                    const mediaContent = quotedMsg[contentType];
+                    const mediaBuffer = await sock.downloadMediaMessage(quotedMsg);
                     
-                    if (contentType === 'conversation' || contentType === 'extendedTextMessage') {
-                        // 📝 Text message with style
-                        const quotedText = quotedMsg.conversation || quotedMsg.extendedTextMessage?.text;
-                        await sock.sendMessage(number, {
-                            text: `📢 *BROADCAST MESSAGE* 📢\n\n${quotedText}${footer}`
-                        });
-                    } 
-                    else if (['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage'].includes(contentType)) {
-                        // 📸 Media message handling
-                        const mediaContent = quotedMsg[contentType];
-                        const mediaBuffer = await sock.downloadMediaMessage(quotedMsg);
-                        
-                        let mediaType = contentType.replace('Message', '');
-                        if (mediaType === 'document') mediaType = 'document';
-                        
-                        const mediaCaption = mediaContent.caption ? 
-                            `📢 *BROADCAST MEDIA* 📢\n\n${mediaContent.caption}${footer}` : 
-                            `📢 *BROADCAST MEDIA* 📢${footer}`;
+                    let mediaType = contentType.replace('Message', '');
+                    if (mediaType === 'document') mediaType = 'document';
+                    
+                    const mediaCaption = mediaContent.caption ? 
+                        `📢 *SECURE MEDIA* 📢\n\n${mediaContent.caption}${footer}` : 
+                        `📢 *SECURE MEDIA* 📢${footer}`;
 
-                        await sock.sendMessage(number, {
-                            [mediaType]: mediaBuffer,
-                            caption: mediaCaption,
-                            mimetype: mediaContent.mimetype
-                        });
-                    } 
-                    else if (contentType === 'stickerMessage') {
-                        // 🎭 Sticker handling
-                        const stickerBuffer = await sock.downloadMediaMessage(quotedMsg);
-                        await sock.sendMessage(number, {
-                            sticker: stickerBuffer
-                        });
-                        // Send follow-up text for stickers
-                        await sock.sendMessage(number, {
-                            text: `📢 *BROADCAST STICKER* 📢${footer}`
-                        });
-                    }
-                    else {
-                        // 🔄 Advanced forwarding
-                        try {
-                            const content = await generateForwardMessageContent(quotedMsg, false);
-                            const newMsg = await generateWAMessageFromContent(number, content.message, {
-                                userJid: from,
-                                quoted: msg
-                            });
-                            await sock.relayMessage(number, newMsg.message, { messageId: newMsg.key.id });
-                            
-                            // Follow-up message
-                            await sock.sendMessage(number, {
-                                text: `📢 *BROADCAST FORWARD* 📢${footer}`
-                            });
-                        } catch (forwardError) {
-                            console.error(`Failed to forward to ${number}:`, forwardError);
-                            await sock.sendMessage(number, {
-                                text: `📢 *BROADCAST MESSAGE* 📢\n\n[Original message format not supported]${footer}`
-                            });
-                        }
-                    }
-                } else {
-                    // 💬 Direct text with epic formatting
-                    await sock.sendMessage(number, {
-                        text: `
-📢 *BROADCAST MESSAGE* 📢
-
-${textBody}${footer}
-                        `.trim()
+                    await sock.sendMessage(targetNumber, {
+                        [mediaType]: mediaBuffer,
+                        caption: mediaCaption,
+                        mimetype: mediaContent.mimetype
+                    });
+                } 
+                else if (contentType === 'stickerMessage') {
+                    // 🎭 Sticker handling
+                    const stickerBuffer = await sock.downloadMediaMessage(quotedMsg);
+                    await sock.sendMessage(targetNumber, {
+                        sticker: stickerBuffer
+                    });
+                    // Send follow-up text for stickers
+                    await sock.sendMessage(targetNumber, {
+                        text: `📢 *SECURE STICKER* 📢${footer}`
                     });
                 }
+                else {
+                    // 🔄 Advanced forwarding
+                    try {
+                        const content = await generateForwardMessageContent(quotedMsg, false);
+                        const newMsg = await generateWAMessageFromContent(targetNumber, content.message, {
+                            userJid: from,
+                            quoted: msg
+                        });
+                        await sock.relayMessage(targetNumber, newMsg.message, { messageId: newMsg.key.id });
+                        
+                        // Follow-up message
+                        await sock.sendMessage(targetNumber, {
+                            text: `📢 *SECURE FORWARD* 📢${footer}`
+                        });
+                    } catch (forwardError) {
+                        console.error(`Failed to forward to ${targetNumber}:`, forwardError);
+                        await sock.sendMessage(targetNumber, {
+                            text: `📢 *SECURE MESSAGE* 📢\n\n[Original message format not supported]${footer}`
+                        });
+                    }
+                }
+            } else {
+                // 💬 Direct text with epic formatting
+                await sock.sendMessage(targetNumber, {
+                    text: `
+📢 *SECURE MESSAGE* 📢
 
-                sentCount++;
-                console.log(`${getRandomSuccess()} Successfully sent to ${number} (${progress}/${specialNumbers.length})`);
-                
-                // Staggered delay for better delivery
-                const delay = specialNumbers.length > 10 ? 8000 : 5000;
-                await sleep(delay);
-                
-            } catch (err) {
-                failedCount++;
-                console.error(`❌ Failed to send to ${number}:`, err);
-                
-                // Continue with next contact
-                continue;
+${messageBody}${footer}
+                    `.trim()
+                });
             }
+
+            // 🎉 MISSION COMPLETE
+            const endTime = Date.now();
+            const duration = ((endTime - startTime) / 1000).toFixed(1);
+            
+            await sock.sendMessage(from, {
+                text: `
+🎊 *TRANSMISSION SUCCESSFUL* 🎊
+
+╔══════════════════════════════════════╗
+║         📊 DELIVERY CONFIRMED        ║
+╠══════════════════════════════════════╣
+║ 🎯 Target: ${targetIdentity.padEnd(23)} ║
+║ 📱 Number: ${targetNumber.replace('@s.whatsapp.net', '').padEnd(22)} ║
+║ ⏱️  Duration: ${duration.padStart(18)}s ║
+║ ✅ Status: DELIVERED SUCCESSFULLY    ║
+╚══════════════════════════════════════╝
+
+${getRandomSuccess().repeat(3)} Message sent via Ernest v2! ${getRandomSuccess().repeat(3)}
+                `.trim(),
+                edit: launchMsg.key
+            });
+
+            console.log(`${getRandomSuccess()} Successfully sent to ${targetIdentity} (${targetNumber}) in ${duration}s`);
+            
+        } catch (err) {
+            console.error(`❌ Failed to send to ${targetIdentity} (${targetNumber}):`, err);
+            
+            await sock.sendMessage(from, {
+                text: `
+❌ *TRANSMISSION FAILED* ❌
+
+🚫 Failed to deliver message to ${targetIdentity}
+📱 Target: ${targetNumber.replace('@s.whatsapp.net', '')}
+⚠️ Error: ${err.message}
+
+🔄 Please try again or check the target number!
+                `.trim(),
+                edit: launchMsg.key
+            });
         }
 
-        // 🎉 MISSION COMPLETE
-        const finalStats = generateStats(sentCount, failedCount, specialNumbers.length, startTime);
-        
-        await sock.sendMessage(from, {
-            text: `
-🎊 *BROADCAST MISSION COMPLETE* 🎊
-
-${finalStats}
-
-${sentCount === specialNumbers.length ? 
-    `🎯 *PERFECT SCORE!* All messages delivered! 🎯` : 
-    `⚡ *MISSION ACCOMPLISHED!* ${sentCount}/${specialNumbers.length} delivered`}
-
-${getRandomSuccess().repeat(3)} Thanks for using Ernest v2 Broadcast! ${getRandomSuccess().repeat(3)}
-            `.trim(),
-            edit: launchMsg.key
-        });
-
-        // 📊 Log final results
-        console.log(`
-🚀 BROADCAST COMPLETE 🚀
-✅ Sent: ${sentCount}
-❌ Failed: ${failedCount}  
-📊 Total: ${specialNumbers.length}
-⏱️ Duration: ${((Date.now() - startTime) / 1000).toFixed(1)}s
-        `);
-
     } catch (err) {
-        console.error('💥 Critical error in broadcast system:', err);
+        console.error('💥 Critical error in messaging system:', err);
         await sock.sendMessage(from, {
             text: `
 💥 *SYSTEM MALFUNCTION* 💥
 
-⚠️ Broadcast system encountered an error!
+⚠️ Secure messaging system encountered an error!
 🔧 Error: ${err.message}
 
 🚀 Ernest v2 is investigating...
@@ -347,8 +329,8 @@ Please try again in a moment! 🤖
     }
 }
 
-export const description = "🚀 Epic broadcast system - sends messages to preset numbers with style! (owner-only)";
-export const category = "broadcast";
+export const description = "🚀 Secure messaging system - send messages using identity keys stored in JSON file";
+export const category = "messaging";
 
 text.description = description;
 text.category = category;

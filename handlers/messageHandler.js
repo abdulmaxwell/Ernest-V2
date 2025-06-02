@@ -11,38 +11,30 @@ const __dirname = path.dirname(__filename);
 // Core data structures
 const commands = {};
 export const commandDescriptions = {};
-const cooldowns = new Map();
-const userActivity = new Map();
 
-// Enhanced emoji system (simplified)
+// Simple emoji system
 const commandEmojis = {
-    // System
     'help': 'ℹ️', 'ping': '🏓', 'info': '📊',
-    
-    // Moderation
     'ban': '🔨', 'kick': '👢', 'mute': '🔇',
-    
-    // Fun
     'joke': '😂', 'meme': '🖼️', 'quote': '💬',
-    
-    // Utility
     'weather': '☀️', 'time': '🕒', 'calc': '🧮',
-    
-    // Reactions
+    'eval': '⚙️', 'exec': '💻', 'restart': '🔄',
     '_success': '✅', '_error': '❌', '_default': '✨'
 };
 
-// Simplified command loader
+// Command loader (simplified)
 export const loadCommands = async () => {
     const commandsPath = path.join(__dirname, '../commands');
     
     if (!fs.existsSync(commandsPath)) {
-        console.warn('⚠️ Commands directory not found');
+        console.warn('Commands directory not found');
         return commands;
     }
 
     const commandFiles = fs.readdirSync(commandsPath)
         .filter(file => file.endsWith('.js') && !file.startsWith('_'));
+
+    console.log(`Loading ${commandFiles.length} commands...`);
 
     for (const file of commandFiles) {
         const commandName = path.basename(file, '.js');
@@ -54,73 +46,98 @@ export const loadCommands = async () => {
             if (typeof module.default === 'function') {
                 commands[commandName] = module.default;
                 
-                // Store metadata if provided
-                if (module.default.description) {
-                    commandDescriptions[commandName] = {
-                        description: module.default.description,
-                        usage: module.default.usage || `${process.env.PREFIX || '!'}${commandName}`,
-                        emoji: module.default.emoji || commandEmojis._default
-                    };
-                }
-                
-                console.log(`✅ Loaded command: ${commandName}`);
+                commandDescriptions[commandName] = {
+                    description: module.default.description || 'No description',
+                    usage: module.default.usage || `${process.env.PREFIX || '!'}${commandName}`,
+                    emoji: module.default.emoji || commandEmojis._default,
+                    ownerOnly: module.default.ownerOnly || false
+                };
             }
         } catch (error) {
-            console.error(`❌ Failed to load ${file}:`, error.message);
+            console.error(`Failed to load ${file}:`, error.message);
         }
     }
 
+    console.log(`✅ ${Object.keys(commands).length} commands loaded`);
     return commands;
 };
 
-// Smart presence management (simplified)
-const handlePresence = async (sock, from, commandName) => {
-    try {
-        // Only show presence for complex commands
-        const complexCommands = ['weather', 'search', 'translate'];
-        if (!complexCommands.includes(commandName)) return;
-
-        await sock.sendPresenceUpdate('composing', from);
-        
-        // Hide after random delay (1-3s)
-        setTimeout(async () => {
-            try {
-                await sock.sendPresenceUpdate('paused', from);
-            } catch (error) {
-                console.error('Error hiding presence:', error);
-            }
-        }, 1000 + Math.random() * 2000);
-    } catch (error) {
-        console.error('Presence error:', error);
-    }
+// Owner check (fixed)
+const isOwner = (from) => {
+    if (!process.env.OWNER_NUMBER) return false;
+    
+    // Handle different formats
+    const cleanFrom = from.replace(/[@s.whatsapp.net@c.us]/g, '');
+    const cleanOwner = process.env.OWNER_NUMBER.replace(/[@s.whatsapp.net@c.us@whatsapp.net]/g, '');
+    
+    console.log(`Owner check: ${cleanFrom} === ${cleanOwner} = ${cleanFrom === cleanOwner}`);
+    
+    return cleanFrom === cleanOwner;
 };
 
-// Cooldown system (essential)
-const checkCooldown = (userId, commandName) => {
-    const cooldownKey = `${userId}-${commandName}`;
-    const lastUsed = cooldowns.get(cooldownKey) || 0;
-    const cooldownTime = 3000; // 3 seconds
+// Process command (no restrictions for regular users)
+export const processCommand = async (sock, msg, from, text) => {
+    const prefix = process.env.PREFIX || '!';
+    
+    const args = text.slice(prefix.length).trim().split(/ +/);
+    const commandName = args.shift().toLowerCase();
+    const command = commands[commandName];
 
-    if (Date.now() - lastUsed < cooldownTime) {
+    console.log(`🎯 Processing command "${commandName}" from ${from}`);
+
+    if (!command) {
+        console.log(`❌ Command "${commandName}" not found`);
+        await sock.sendMessage(from, {
+            react: { text: '⚠️', key: msg.key }
+        });
         return false;
     }
 
-    cooldowns.set(cooldownKey, Date.now());
-    return true;
+    // Check if owner-only command (only block if command is owner-only AND user is not owner)
+    const cmdInfo = commandDescriptions[commandName];
+    if (cmdInfo?.ownerOnly && !isOwner(from)) {
+        console.log(`🚫 Owner-only command "${commandName}" blocked for ${from}`);
+        await sock.sendMessage(from, {
+            text: "❌ Owner-only command",
+            react: { text: '⛔', key: msg.key }
+        });
+        return false;
+    }
+
+    // Execute command immediately
+    try {
+        console.log(`🚀 Executing command: ${commandName}`);
+        await command(sock, msg, from, args);
+        
+        const emoji = cmdInfo?.emoji || commandEmojis._success;
+        await sock.sendMessage(from, {
+            react: { text: emoji, key: msg.key }
+        });
+        
+        console.log(`✅ Command "${commandName}" executed successfully`);
+        return true;
+    } catch (error) {
+        console.error(`❌ Command error [${commandName}]:`, error.message);
+        await sock.sendMessage(from, {
+            react: { text: commandEmojis._error, key: msg.key }
+        });
+        return false;
+    }
 };
 
-// Enhanced but simple message handler
+// Fast message handler
 export const messageHandler = async (sock, afkUsers, presenceSettings = {
     TYPING: true,
     AUDIO: false
 }) => {
-    if (sock._messageHandlerRegistered) return;
+    if (sock._messageHandlerRegistered) {
+        return;
+    }
     sock._messageHandlerRegistered = true;
 
-    const commandList = await loadCommands();
     const prefix = process.env.PREFIX || '!';
-
-    console.log(`🤖 Handler ready with prefix "${prefix}" (${Object.keys(commandList).length} commands)`);
+    console.log(`🤖 Bot ready with prefix "${prefix}"`);
+    console.log(`👑 Owner number: ${process.env.OWNER_NUMBER || 'Not set'}`);
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
         for (const msg of messages) {
@@ -132,70 +149,41 @@ export const messageHandler = async (sock, afkUsers, presenceSettings = {
                            msg.message?.extendedTextMessage?.text || 
                            '';
 
-                // Handle AFK users
-                if (afkUsers.has(from) && text.startsWith(prefix)) {
+                if (!text) continue;
+
+                // Debug log for every message
+                console.log(`📨 From: ${from} | Text: "${text}"`);
+
+                // Handle AFK users (simplified)
+                if (afkUsers.has(from) && (text.startsWith(prefix) || text.startsWith('#'))) {
                     const afkData = afkUsers.get(from);
                     const timeAway = Math.floor((Date.now() - afkData.timestamp) / 1000);
                     await sock.sendMessage(from, {
-                        text: `⏳ ${afkData.name} is AFK (${timeAway}s)\n💬 Reason: ${afkData.reason}`
+                        text: `⏳ ${afkData.name} was AFK (${timeAway}s ago)\n💬 ${afkData.reason}`
                     });
                     afkUsers.delete(from);
                 }
 
-                if (!text.startsWith(prefix)) continue;
-
-                const args = text.slice(prefix.length).trim().split(/ +/);
-                const commandName = args.shift().toLowerCase();
-                const command = commandList[commandName];
-
-                if (!command) {
-                    await sock.sendMessage(from, {
-                        react: { text: '⚠️', key: msg.key }
-                    });
-                    return;
+                // Handle owner commands (start with #)
+                if (text.startsWith('#')) {
+                    console.log(`# command detected from ${from}`);
+                    if (isOwner(from)) {
+                        console.log(`✅ Owner verified, processing command`);
+                        await processCommand(sock, msg, from, text.replace('#', prefix));
+                    } else {
+                        console.log(`❌ Not owner, ignoring # command`);
+                    }
+                    continue;
                 }
 
-                // Check cooldown
-                const userId = msg.key.participant || from;
-                if (!checkCooldown(userId, commandName)) {
-                    await sock.sendMessage(from, {
-                        text: '⏳ Please wait before using this command again',
-                        react: { text: '🕒', key: msg.key }
-                    });
-                    return;
+                // Handle regular commands - PROCESS FOR EVERYONE
+                if (text.startsWith(prefix)) {
+                    console.log(`${prefix} command detected from ${from}`);
+                    await processCommand(sock, msg, from, text);
                 }
-
-                // Track activity
-                userActivity.set(userId, {
-                    lastCommand: commandName,
-                    timestamp: Date.now()
-                });
-
-                // Handle presence
-                if (presenceSettings.TYPING) {
-                    await handlePresence(sock, from, commandName);
-                }
-
-                // Execute command
-                await command(sock, msg, from, args);
-
-                // Send success reaction
-                const emoji = commandDescriptions[commandName]?.emoji || commandEmojis._success;
-                await sock.sendMessage(from, {
-                    react: { text: emoji, key: msg.key }
-                });
 
             } catch (error) {
-                console.error(`💥 Command error:`, error.stack || error);
-                
-                try {
-                    await sock.sendMessage(from, {
-                        react: { text: commandEmojis._error, key: msg.key },
-                        text: `❌ Error executing command: ${error.message}`
-                    });
-                } catch (e) {
-                    console.error('Failed to send error:', e);
-                }
+                console.error('Message handling error:', error.message);
             }
         }
     });
@@ -203,5 +191,3 @@ export const messageHandler = async (sock, afkUsers, presenceSettings = {
 
 // Export utilities
 export const commandMap = commands;
-export const getCooldowns = () => Object.fromEntries(cooldowns);
-export const getActivity = () => Object.fromEntries(userActivity);
