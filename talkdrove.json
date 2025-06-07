@@ -1,60 +1,245 @@
 {
-    "bot-name": "ErnestV2",
-    "description": "Bot made by Ernest Tech House - The 1st emerging bot in the whole world",
-    "logo": "https://avatars.githubusercontent.com/u/173539960?s=400&v=4",
-    "keywords": ["bot", "whatsapp"],
-    "owner-verification": "peaseernest8@gmail.com",
-    "documentation-link": "https://ernest-v2-deployment-guide.vercel.app/", 
-    "env": {
-      "SESSION_ID": {
-        "description": "WhatsApp session string",
-        "value": "your_session_string_here",
-        "required": true
-      },
-      "PREFIX": {
-        "description": "Bot command prefix",
-        "value": ".",
-        "required": true
-      },
-      "OWNER_NUMBER": {
-        "description": "Owner number with country code",
-        "value": "254793859108",
-        "required": true
-      },
-      "SPECIAL_NUMBERS": {
-        "description": "Special numbers with country codes, comma separated",
-        "value": "254797934968,254742681410,254710494999,254104825568,256782154150,256756635051,254757719636,254115522243,254745810049",
-        "required": false
-      },
-      "MODE": {
-        "description": "Bot mode (public/private)",
-        "value": "public",
-        "required": true
-      },
-      "ALWAYS_ONLINE": {
-        "description": "Keep bot always online",
-        "value": "true",
-        "required": false
-      },
-      "TYPING": {
-        "description": "Show typing indicator if true the audio should be false",
-        "value": "true",
-        "required": false
-      },
-      "AUDIO": {
-        "description": "Enable audio features if true the typing should be false",
-        "value": "false",
-        "required": false
-      },
-      "TIMEZONE": {
-        "description": "Server timezone",
-        "value": "Africa/Nairobi",
-        "required": false
-      },
-      "WEATHER_API_KEY": {
-        "description": "Weather API key",
-        "value": "4eae741def192d7170adcc74d60d9ceb",
-        "required": false
-      }
+  "bot-name": "ErnestV2",
+  "description": "Bot made by Ernest Tech House - The 1st emerging bot in the whole world",
+  "logo": "https://avatars.githubusercontent.com/u/173539960?s=400&v=4",
+  "keywords": ["bot", "whatsapp"],
+  "owner-verification": "peaseernest8@gmail.com",
+  "documentation-link": "https://ernest-v2-deployment-guide.vercel.app/",
+  "env": {
+    "SESSION_ID": {
+      "description": "WhatsApp session string (Base64 encoded creds.json). Leave blank to generate new session.",
+      "value": "",
+      "required": false
+    },
+    "PREFIX": {
+      "description": "Bot command prefix (e.g., '!' for !help).",
+      "value": "!",
+      "required": true
+    },
+    "OWNER_NUMBER": {
+      "description": "The bot owner's WhatsApp number in JID format (e.g., 254793859108@whatsapp.net).",
+      "value": "254793859108@whatsapp.net",
+      "required": true
+    },
+    "SPECIAL_NUMBERS": {
+      "description": "Comma-separated list of additional numbers for special bot interactions/alerts (e.g., 254797934968,254742681410).",
+      "value": "254797934968,254742681410,254710494999,254104825568,256782154150,256756635051,254757719636,254115522243,254745810049",
+      "required": false
+    },
+    "BOT_OWNER": {
+      "description": "Primary owner's phone number without country code prefix or spaces (e.g., 2347055249541). Used for specific features like anti-delete.",
+      "value": "2347055249541",
+      "required": true
+    },
+    "MODE": {
+      "description": "Bot operating mode. 'public' allows anyone to use commands; 'private' restricts commands to owner/special numbers.",
+      "value": "public",
+      "required": true
+    },
+    "ALWAYS_ONLINE": {
+      "description": "Set to 'true' to keep the bot's WhatsApp status always online.",
+      "value": "true",
+      "required": false
+    },
+    "TYPING": {
+      "description": "Set to 'true' to show a typing indicator when the bot is preparing a response. If true, AUDIO should be false.",
+      "value": "true",
+      "required": false
+    },
+    "AUDIO": {
+      "description": "Set to 'true' to enable audio features/show recording indicator. If true, TYPING should be false.",
+      "value": "false",
+      "required": false
+    },
+    "AUTO_TYPING_INDICATOR_ENABLED": {
+      "description": "Set to 'true' to automatically show a typing indicator upon receiving messages.",
+      "value": "true",
+      "required": false
+    },
+    "TIMEZONE": {
+      "description": "Timezone for bot operations (e.g., 'Africa/Nairobi', 'Europe/Amsterdam'). Used for timed messages.",
+      "value": "Africa/Nairobi",
+      "required": false
+    },
+    "WEATHER_API_KEY": {
+      "description": "API key for weather services (e.g., OpenWeatherMap). Get one from a weather API provider.",
+      "value": "YOUR_WEATHER_API_KEY_HERE",
+      "required": false
+    },
+    "BOT_NAME_DISPLAY": {
+      "description": "The name of your bot as displayed in signatures and greetings.",
+      "value": "ErnestBot",
+      "required": false
+    },
+    "BOT_VERSION_DISPLAY": {
+      "description": "The version string of the bot.",
+      "value": "2.6.0",
+      "required": false
+    },
+    "UNIQUE_ID_DISPLAY": {
+      "description": "A unique identifier for this bot instance.",
+      "value": "1",
+      "required": false
+    },
+    "PORT_SERVER": {
+      "description": "The port number for the bot's web server (for QR/Pair Code generation).",
+      "value": "3000",
+      "required": false
+    },
+    "LOG_LEVEL": {
+      "description": "Logging verbosity: 'debug', 'info', 'warn', or 'error'.",
+      "value": "debug",
+      "required": false
+    },
+    "BOT_REPO": {
+      "description": "URL to the bot's GitHub repository.",
+      "value": "https://github.com/PeaseErnest12287/Ernest-V2.git",
+      "required": false
+    },
+    "BOT_GROUP": {
+      "description": "URL to the bot's official WhatsApp group.",
+      "value": "https://chat.whatsapp.com/FAJjIZY3a09Ck73ydqMs4E",
+      "required": false
+    },
+    "BOT_CHANNEL": {
+      "description": "URL to the bot's official WhatsApp channel.",
+      "value": "https://whatsapp.com/channel/0029VayK4ty7DAWr0jeCZx0i",
+      "required": false
+    },
+    "BOT_IMAGE_URL": {
+      "description": "Direct URL to the bot's profile picture or logo.",
+      "value": "https://avatars.githubusercontent.com/u/173539960?s=400&v=4",
+      "required": false
+    },
+    "READ_COMMAND_ENABLED": {
+      "description": "Set to 'true' to mark messages containing commands as read.",
+      "value": "true",
+      "required": false
+    },
+    "UNREAD_COMMAND_ENABLED": {
+      "description": "Set to 'true' to automatically mark all unread messages as read.",
+      "value": "true",
+      "required": false
+    },
+    "BOT_SIGNATURE_ENABLED": {
+      "description": "Set to 'true' to include a signature in bot responses.",
+      "value": "true",
+      "required": false
+    },
+    "BOT_SIGNATURE_TEXT": {
+      "description": "The text content for the bot's signature.",
+      "value": "| ErnestV2",
+      "required": false
+    },
+    "AUTO_READ_MESSAGES": {
+      "description": "Set to 'true' to automatically mark all incoming messages as read.",
+      "value": "true",
+      "required": false
+    },
+    "AUTO_VIEW_STATUS_ENABLED": {
+      "description": "Set to 'true' to automatically view WhatsApp status updates (sends blue ticks).",
+      "value": "true",
+      "required": false
+    },
+    "SEND_STATUS_VIEW_NOTIFICATION_ENABLED": {
+      "description": "Set to 'true' to send a message notification after viewing a status.",
+      "value": "false",
+      "required": false
+    },
+    "STATUS_VIEW_NOTIFICATION_TEXT": {
+      "description": "The custom message sent when 'SEND_STATUS_VIEW_NOTIFICATION_ENABLED' is true.",
+      "value": "Just viewed your status. -ErnestV2",
+      "required": false
+    },
+    "ANTI_DELETE_ENABLED": {
+      "description": "Set to 'true' to enable the anti-delete feature, retrieving deleted messages.",
+      "value": "true",
+      "required": false
+    },
+    "ANTI_DELETE_STORAGE_PATH": {
+      "description": "File path to store retrieved deleted messages.",
+      "value": "./data/messages.json",
+      "required": false
+    },
+    "AUTO_VIEW_CHANNELS_ENABLED": {
+      "description": "Set to 'true' to automatically mark channel messages as read.",
+      "value": "true",
+      "required": false
+    },
+    "SPECIAL_CONTACT_ALERTS": {
+      "description": "Comma-separated list of numbers (without + or spaces) for special contact alerts.",
+      "value": "254757719636,2347055249541,254727487279,254115522243,254103106336",
+      "required": false
+    },
+    "RADAR_API_KEY": {
+      "description": "API key for Radar location services. Leave blank if not used.",
+      "value": "YOUR_RADAR_API_KEY_HERE",
+      "required": false
+    },
+    "REMOVEBG_API_KEY": {
+      "description": "API key for background removal services (e.g., remove.bg). Leave blank if not used.",
+      "value": "YOUR_REMOVEBG_API_KEY_HERE",
+      "required": false
+    },
+    "PYTHON_API_URL": {
+      "description": "URL for a Python API backend, if your bot integrates with one. (e.g., http://localhost:5000).",
+      "value": "http://localhost:5000",
+      "required": false
+    },
+    "MORNING_MESSAGE": {
+      "description": "Custom message sent by the bot in the morning.",
+      "value": "Good morning! Hope your day is amazing ☀️",
+      "required": false
+    },
+    "MID_MESSAGE": {
+      "description": "Custom message sent by the bot in the middle of the day.",
+      "value": "Keep pushing! You're doing great 💪",
+      "required": false
+    },
+    "NIGHT_MESSAGE": {
+      "description": "Custom message sent by the bot at night.",
+      "value": "Good night, rest well 😴",
+      "required": false
+    },
+    "CREATOR_NAME": {
+      "description": "Your name or the bot creator's name.",
+      "value": "Peace Ernest",
+      "required": false
+    },
+    "CREATOR_TITLE": {
+      "description": "Your professional title or role (e.g., Founder, Developer).",
+      "value": "Founder, Ernest Tech House",
+      "required": false
+    },
+    "CREATOR_MOTTO": {
+      "description": "A personal motto or inspiring phrase.",
+      "value": "Build loud. Move smart.",
+      "required": false
+    },
+    "CREATOR_EMAIL": {
+      "description": "Your contact email address.",
+      "value": "peaseernest8@gmail.com",
+      "required": false
+    },
+    "CREATOR_NUMBER": {
+      "description": "Your contact number for general inquiries (without + or spaces).",
+      "value": "254793859108",
+      "required": false
+    },
+    "CREATOR_YOUTUBE_URL": {
+      "description": "URL to your YouTube channel. Leave blank if none.",
+      "value": "YOUR_YOUTUBE_CHANNEL_URL_HERE",
+      "required": false
+    },
+    "CREATOR_PORTFOLIO_URL": {
+      "description": "URL to your portfolio, GitHub, or LinkedIn profile.",
+      "value": "https://github.com/PeaseErnest12287",
+      "required": false
+    },
+    "CREATOR_PFP_URL": {
+      "description": "Direct URL to your profile picture for display.",
+      "value": "https://avatars.githubusercontent.com/u/173539960?s=400&v=4",
+      "required": false
     }
+  }
 }
