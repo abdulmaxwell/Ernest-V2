@@ -1,95 +1,110 @@
-const stealViewOnce = async (sock, msg, from) => {
+// Assuming this is in your vv.js file
+import { downloadContentFromMessage } from '@whiskeysockets/baileys';
+import fs from 'fs/promises';
+import path from 'path';
+
+const stealViewOnce = async (sock, msg, from, args) => {
   try {
-    console.log("🔍 Checking for view-once message...");
-    
-    // Get the quoted message
+    console.log("DEBUG: Running stealViewOnce command...");
+
     const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+
     if (!quoted) {
-      console.log("❌ No quoted message found");
-      return await sock.sendMessage(from, {
-        text: "❌ *You need to reply to a view-once image or video message with this command.*",
-      }, { quoted: msg });
+      console.log("DEBUG: No message quoted.");
+      return await sock.sendMessage(from, { text: "Please reply to a message containing media (image/video)." }, { quoted: msg });
     }
 
-    console.log("📋 Quoted message keys:", Object.keys(quoted));
-
-    // Check for different view-once message formats
-    let viewOnceMessage = null;
+    // --- Refined logic starts here ---
+    let mediaToDownload = null;
     let mediaType = null;
 
-    // Try different possible structures
-    if (quoted.viewOnceMessageV2?.message) {
-      viewOnceMessage = quoted.viewOnceMessageV2.message;
-      console.log("✅ Found viewOnceMessageV2");
-    } else if (quoted.viewOnceMessage?.message) {
-      viewOnceMessage = quoted.viewOnceMessage.message;
-      console.log("✅ Found viewOnceMessage");
-    } else if (quoted.imageMessage?.viewOnce) {
-      viewOnceMessage = { imageMessage: quoted.imageMessage };
-      console.log("✅ Found direct imageMessage with viewOnce");
-    } else if (quoted.videoMessage?.viewOnce) {
-      viewOnceMessage = { videoMessage: quoted.videoMessage };
-      console.log("✅ Found direct videoMessage with viewOnce");
-    }
-
-    if (!viewOnceMessage) {
-      console.log("❌ No view-once content found");
-      console.log("📋 Available message types:", Object.keys(quoted));
-      return await sock.sendMessage(from, {
-        text: "❌ *That message is not a view-once media.* Try again with a correct one.",
-      }, { quoted: msg });
-    }
-
-    // Determine media type and get the message
-    const messageKeys = Object.keys(viewOnceMessage);
-    console.log("📋 View-once message keys:", messageKeys);
-
-    if (viewOnceMessage.imageMessage) {
+    // 1. Check if it's directly an imageMessage or videoMessage
+    if (quoted.imageMessage) {
+      mediaToDownload = quoted.imageMessage;
       mediaType = 'image';
-    } else if (viewOnceMessage.videoMessage) {
+      console.log("DEBUG: Quoted message identified as direct image.");
+    } else if (quoted.videoMessage) {
+      mediaToDownload = quoted.videoMessage;
       mediaType = 'video';
-    } else {
-      console.log("❌ Unknown media type in view-once message");
-      return await sock.sendMessage(from, {
-        text: "❌ *Unsupported view-once media type.*",
-      }, { quoted: msg });
+      console.log("DEBUG: Quoted message identified as direct video.");
+    }
+    // 2. If not direct, check if it's a viewOnceMessageV2
+    else if (quoted.viewOnceMessageV2) {
+      const viewOnceContent = quoted.viewOnceMessageV2.message;
+      if (viewOnceContent?.imageMessage) {
+        mediaToDownload = viewOnceContent.imageMessage;
+        mediaType = 'image';
+        console.log("DEBUG: Quoted message identified as viewOnceMessageV2 containing an image.");
+      } else if (viewOnceContent?.videoMessage) {
+        mediaToDownload = viewOnceContent.videoMessage;
+        mediaType = 'video';
+        console.log("DEBUG: Quoted message identified as viewOnceMessageV2 containing a video.");
+      }
     }
 
-    const mediaMessage = viewOnceMessage[`${mediaType}Message`];
-    console.log(`📱 Processing ${mediaType} message...`);
+    if (!mediaToDownload || !mediaType) {
+      console.log(`DEBUG: Quoted message type not recognized for media download. Keys: ${Object.keys(quoted)}`);
+      return await sock.sendMessage(from, { text: "The replied message does not contain a supported image or video." }, { quoted: msg });
+    }
 
-    // Download the media
-    console.log("⬇️ Downloading media content...");
-    const stream = await sock.downloadContentFromMessage(mediaMessage, mediaType);
-    
-    const chunks = [];
+    console.log(`DEBUG: Attempting to download ${mediaType}.`);
+    const stream = await downloadContentFromMessage(mediaToDownload, mediaType);
+    let buffer = Buffer.from([]);
     for await (const chunk of stream) {
-      chunks.push(chunk);
+      buffer = Buffer.concat([buffer, chunk]);
     }
-    const buffer = Buffer.concat(chunks);
+
+    if (buffer.length === 0) {
+      console.log("DEBUG: Downloaded buffer is empty.");
+      return await sock.sendMessage(from, { text: "Failed to download the media content." }, { quoted: msg });
+    }
+
+    const ext = mediaType === 'image' ? 'jpg' : 'mp4';
+    const filename = `stolen_media_${msg.key.id}.${ext}`;
+    const tempDir = path.join(process.cwd(), 'temp');
+    const filePath = path.join(tempDir, filename);
+
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, buffer);
+
+    console.log(`DEBUG: Downloaded and saved as ${filename}`);
+
+    // Send the media back
+    // ... (rest of your stealViewOnce function code)
+
+    // Generate the dynamic caption
+    let captionText = "";
+    if (mediaType === 'image') {
+      captionText = "📸 ErnestV2 has successfully gotten your image!";
+    } else if (mediaType === 'video') {
+      captionText = "🎥 ErnestV2 has successfully gotten your video!";
+    } else {
+      captionText = "ErnestV2 has successfully gotten your media!"; // Fallback, though should be covered by checks
+    }
+
+    // Send the media back with the dynamic caption
+    if (mediaType === 'image') {
+      await sock.sendMessage(from, { image: { url: filePath }, caption: captionText });
+    } else if (mediaType === 'video') {
+      await sock.sendMessage(from, { video: { url: filePath }, caption: captionText });
+    }
+
+    // ... (rest of your stealViewOnce function code)
     
-    console.log(`✅ Downloaded ${buffer.length} bytes`);
-
-    // Send the unlocked media
-    const sendOptions = {
-      [mediaType]: buffer,
-      caption: "🔓 *View Once unlocked by Ernest v2*",
-    };
-
-    await sock.sendMessage(from, sendOptions, { quoted: msg });
-    console.log("✅ View-once media sent successfully!");
+    await fs.unlink(filePath); // Clean up temp file
+    console.log(`DEBUG: Deleted temporary file ${filePath}`);
 
   } catch (err) {
     console.error("❌ Error in stealViewOnce:", err);
     console.error("❌ Error stack:", err.stack);
-    
-    await sock.sendMessage(from, {
-      text: "🚫 *Failed to fetch view-once media. Error details logged.*",
-    }, { quoted: msg });
+    await sock.sendMessage(from, { text: `An error occurred while trying to steal the media: ${err.message}` }, { quoted: msg });
   }
 };
 
-stealViewOnce.description = "Unlock and resend view-once media (must reply to it).";
-stealViewOnce.category = "Media";
+// Add command metadata
+stealViewOnce.description = "Steals media (image/video) from a replied message, including view once.";
+stealViewOnce.category = "Utility";
+stealViewOnce.usage = "/vv - Reply to an image or video (including view once).";
+stealViewOnce.emoji = "👀";
 
 export default stealViewOnce;

@@ -1,193 +1,230 @@
+// messageHandler.js
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import dotenv from 'dotenv';
+import { antidelete } from './antidelete.js';
+import { jidNormalizedUser } from '@whiskeysockets/baileys'; // Keep this import!
+
+// Import the new specialAlerts handler
+import { handleSpecialAlert } from './specialAlerts.js';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Core data structures
 const commands = {};
 export const commandDescriptions = {};
 
-// Simple emoji system
-const commandEmojis = {
-    'help': 'ℹ️', 'ping': '🏓', 'info': '📊',
-    'ban': '🔨', 'kick': '👢', 'mute': '🔇',
-    'joke': '😂', 'meme': '🖼️', 'quote': '💬',
-    'weather': '☀️', 'time': '🕒', 'calc': '🧮',
-    'eval': '⚙️', 'exec': '💻', 'restart': '🔄',
-    '_success': '✅', '_error': '❌', '_default': '✨'
-};
-
-// Command loader (simplified)
 export const loadCommands = async () => {
     const commandsPath = path.join(__dirname, '../commands');
-    
-    if (!fs.existsSync(commandsPath)) {
-        console.warn('Commands directory not found');
-        return commands;
-    }
-
-    const commandFiles = fs.readdirSync(commandsPath)
-        .filter(file => file.endsWith('.js') && !file.startsWith('_'));
-
-    console.log(`Loading ${commandFiles.length} commands...`);
+    const commandFiles = fs.readdirSync(commandsPath).filter(
+        file => file.endsWith('.js') && !file.startsWith('_')
+    );
 
     for (const file of commandFiles) {
-        const commandName = path.basename(file, '.js');
-        const modulePath = pathToFileURL(path.join(commandsPath, file));
+        const modulePath = pathToFileURL(path.join(commandsPath, file)).href;
 
         try {
             const module = await import(modulePath);
-            
+            const commandName = path.basename(file, '.js');
+
             if (typeof module.default === 'function') {
                 commands[commandName] = module.default;
-                
-                commandDescriptions[commandName] = {
-                    description: module.default.description || 'No description',
-                    usage: module.default.usage || `${process.env.PREFIX || '!'}${commandName}`,
-                    emoji: module.default.emoji || commandEmojis._default,
-                    ownerOnly: module.default.ownerOnly || false
-                };
+                if (module.default.description) {
+                    commandDescriptions[commandName] = module.default.description;
+                }
+            } else {
+                console.warn(`Skipping ${file}: No default export found.`);
             }
         } catch (error) {
-            console.error(`Failed to load ${file}:`, error.message);
+            console.error(`❌ Failed to load command '${file}':`, error);
         }
     }
-
-    console.log(`✅ ${Object.keys(commands).length} commands loaded`);
     return commands;
 };
 
-// Owner check (fixed)
-const isOwner = (from) => {
-    if (!process.env.OWNER_NUMBER) return false;
-    
-    // Handle different formats
-    const cleanFrom = from.replace(/[@s.whatsapp.net@c.us]/g, '');
-    const cleanOwner = process.env.OWNER_NUMBER.replace(/[@s.whatsapp.net@c.us@whatsapp.net]/g, '');
-    
-    console.log(`Owner check: ${cleanFrom} === ${cleanOwner} = ${cleanFrom === cleanOwner}`);
-    
-    return cleanFrom === cleanOwner;
-};
-
-// Process command (no restrictions for regular users)
-export const processCommand = async (sock, msg, from, text) => {
-    const prefix = process.env.PREFIX || '!';
-    
-    const args = text.slice(prefix.length).trim().split(/ +/);
-    const commandName = args.shift().toLowerCase();
-    const command = commands[commandName];
-
-    console.log(`🎯 Processing command "${commandName}" from ${from}`);
-
-    if (!command) {
-        console.log(`❌ Command "${commandName}" not found`);
-        await sock.sendMessage(from, {
-            react: { text: '⚠️', key: msg.key }
-        });
-        return false;
-    }
-
-    // Check if owner-only command (only block if command is owner-only AND user is not owner)
-    const cmdInfo = commandDescriptions[commandName];
-    if (cmdInfo?.ownerOnly && !isOwner(from)) {
-        console.log(`🚫 Owner-only command "${commandName}" blocked for ${from}`);
-        await sock.sendMessage(from, {
-            text: "❌ Owner-only command",
-            react: { text: '⛔', key: msg.key }
-        });
-        return false;
-    }
-
-    // Execute command immediately
-    try {
-        console.log(`🚀 Executing command: ${commandName}`);
-        await command(sock, msg, from, args);
-        
-        const emoji = cmdInfo?.emoji || commandEmojis._success;
-        await sock.sendMessage(from, {
-            react: { text: emoji, key: msg.key }
-        });
-        
-        console.log(`✅ Command "${commandName}" executed successfully`);
-        return true;
-    } catch (error) {
-        console.error(`❌ Command error [${commandName}]:`, error.message);
-        await sock.sendMessage(from, {
-            react: { text: commandEmojis._error, key: msg.key }
-        });
-        return false;
-    }
-};
-
-// Fast message handler
-export const messageHandler = async (sock, afkUsers, presenceSettings = {
-    TYPING: true,
-    AUDIO: false
-}) => {
-    if (sock._messageHandlerRegistered) {
-        return;
-    }
+export const messageHandler = async (sock) => {
+    if (sock._messageHandlerRegistered) return;
     sock._messageHandlerRegistered = true;
 
+    const commandList = await loadCommands();
     const prefix = process.env.PREFIX || '!';
-    console.log(`🤖 Bot ready with prefix "${prefix}"`);
-    console.log(`👑 Owner number: ${process.env.OWNER_NUMBER || 'Not set'}`);
 
-    sock.ev.on('messages.upsert', async ({ messages }) => {
+    // --- Configuration Variables ---
+    const autoReadGeneralEnabled = process.env.AUTO_READ_MESSAGES === 'true';
+    const botSignatureEnabled = process.env.BOT_SIGNATURE_ENABLED === 'true';
+    const botSignatureText = process.env.BOT_SIGNATURE_TEXT || ' | Bot';
+
+    const autoViewStatusEnabled = process.env.AUTO_VIEW_STATUS_ENABLED === 'true';
+    const sendStatusNotificationEnabled = process.env.SEND_STATUS_VIEW_NOTIFICATION_ENABLED === 'true';
+    const statusViewNotificationText = process.env.STATUS_VIEW_NOTIFICATION_TEXT || 'Just viewed your status. -Bot';
+
+    const autoViewChannelsEnabled = process.env.AUTO_VIEW_CHANNELS_ENABLED === 'true';
+    const autoTypingIndicatorEnabled = process.env.AUTO_TYPING_INDICATOR_ENABLED === 'true';
+
+    // Special Contact Alerts
+    const specialContactAlertsEnabled = process.env.SPECIAL_CONTACT_ALERTS && process.env.SPECIAL_CONTACT_ALERTS.length > 0;
+    const specialContactJids = specialContactAlertsEnabled
+        ? process.env.SPECIAL_CONTACT_ALERTS.split(',').map(num => jidNormalizedUser(`${num}@s.whatsapp.net`))
+        : [];
+    // --- End Configuration Variables ---
+
+    // --- Emojis for Command Reactions ---
+    const reactionEmojis = ['✅', '👍', '✨', '🚀', '🌟', '🤖', '🔥', '🎉', '💡', '💬', '💫', '👍'];
+    // --- End Emojis for Command Reactions ---
+
+    // --- Logging Initial States ---
+    if (autoReadGeneralEnabled) {
+        console.log("INFO: General auto-reading of all incoming messages is ENABLED.");
+    } else {
+        console.log("INFO: General auto-reading of all incoming messages is DISABLED.");
+    }
+    if (autoViewStatusEnabled) {
+        console.log(`INFO: Auto-viewing status updates is ENABLED.`);
+        if (sendStatusNotificationEnabled) {
+            console.log(`INFO: Sending notification after status view is ENABLED.`);
+        }
+    } else {
+        console.log("INFO: Auto-viewing status updates is DISABLED.");
+    }
+    if (autoViewChannelsEnabled) {
+        console.log("INFO: Auto-viewing channel updates is ENABLED.");
+    } else {
+        console.log("INFO: Auto-viewing channel updates is DISABLED.");
+    }
+    if (autoTypingIndicatorEnabled) {
+        console.log("INFO: Auto-typing indicator on incoming messages is ENABLED.");
+    } else {
+        console.log("INFO: Auto-typing indicator on incoming messages is DISABLED.");
+    }
+    if (specialContactAlertsEnabled) {
+        console.log("INFO: Special contact alerts are ENABLED.");
+        console.log("INFO: Special contacts:", specialContactJids.map(jid => jid.split('@')[0]).join(', '));
+    } else {
+        console.log("INFO: Special contact alerts are DISABLED.");
+    }
+    // --- End Logging Initial States ---
+
+
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (type !== 'notify') return;
+
         for (const msg of messages) {
             const from = msg.key.remoteJid;
-            if (!from || msg.key.fromMe) continue;
+            if (!from) continue;
+
+            const botJid = sock.user.id; // Get bot's own JID
+
+            // --- Show Typing Indicator Immediately (if enabled and not from bot) ---
+            if (autoTypingIndicatorEnabled && !msg.key.fromMe) {
+                await sock.sendPresenceUpdate('composing', from);
+                console.log(`DEBUG: Sent 'composing' presence to ${from}.`);
+            }
 
             try {
-                const text = msg.message?.conversation || 
-                           msg.message?.extendedTextMessage?.text || 
-                           '';
+                let messageHandledByAutoFeatures = false; // Flag to know if message was processed by specific auto-features
 
-                if (!text) continue;
+                // --- 1. Handle Status Messages ---
+                if (from === 'status@broadcast') {
+                    if (autoViewStatusEnabled) {
+                        const statusOwnerJid = msg.key.participant;
+                        if (statusOwnerJid && statusOwnerJid !== botJid) {
+                            await sock.readMessages([msg.key], 'read');
+                            console.log(`DEBUG: Auto-viewed status from ${statusOwnerJid} (ID: ${msg.key.id}).`);
 
-                // Debug log for every message
-                console.log(`📨 From: ${from} | Text: "${text}"`);
-
-                // Handle AFK users (simplified)
-                if (afkUsers.has(from) && (text.startsWith(prefix) || text.startsWith('#'))) {
-                    const afkData = afkUsers.get(from);
-                    const timeAway = Math.floor((Date.now() - afkData.timestamp) / 1000);
-                    await sock.sendMessage(from, {
-                        text: `⏳ ${afkData.name} was AFK (${timeAway}s ago)\n💬 ${afkData.reason}`
-                    });
-                    afkUsers.delete(from);
-                }
-
-                // Handle owner commands (start with #)
-                if (text.startsWith('#')) {
-                    console.log(`# command detected from ${from}`);
-                    if (isOwner(from)) {
-                        console.log(`✅ Owner verified, processing command`);
-                        await processCommand(sock, msg, from, text.replace('#', prefix));
-                    } else {
-                        console.log(`❌ Not owner, ignoring # command`);
+                            if (sendStatusNotificationEnabled) {
+                                await sock.sendMessage(statusOwnerJid, { text: statusViewNotificationText });
+                                console.log(`DEBUG: Sent status view notification to ${statusOwnerJid}.`);
+                            }
+                        }
                     }
-                    continue;
+                    messageHandledByAutoFeatures = true;
                 }
 
-                // Handle regular commands - PROCESS FOR EVERYONE
-                if (text.startsWith(prefix)) {
-                    console.log(`${prefix} command detected from ${from}`);
-                    await processCommand(sock, msg, from, text);
+                // --- 2. Handle Channel Messages ---
+                if (from.endsWith('@newsletter') && !messageHandledByAutoFeatures) {
+                    if (autoViewChannelsEnabled) {
+                        await sock.readMessages([msg.key], 'read');
+                        console.log(`DEBUG: Auto-read channel message from ${from} (ID: ${msg.key.id}).`);
+                    }
+                    messageHandledByAutoFeatures = true;
+                }
+                
+                // --- 3. Handle General Auto-Read (for all other messages, if not from bot or already handled by status/channel) ---
+                if (autoReadGeneralEnabled && !msg.key.fromMe && !messageHandledByAutoFeatures) {
+                    await sock.readMessages([msg.key], 'read');
+                    console.log(`DEBUG: General auto-read message from ${from} (ID: ${msg.key.id}).`);
+                    messageHandledByAutoFeatures = true; // Mark as handled
                 }
 
-            } catch (error) {
-                console.error('Message handling error:', error.message);
+                // --- 4. Special Contact Alert (only if message is from a special contact and NOT from bot itself) ---
+                if (specialContactAlertsEnabled && !msg.key.fromMe) { // We check if specialContactJids includes `from` inside the handler
+                    await handleSpecialAlert(sock, msg, from, specialContactJids, botJid);
+                }
+
+
+                // --- 5. Handle Antidelete ---
+                await antidelete(sock, msg);
+
+                // --- 6. Handle Commands ---
+                const text = msg.message?.conversation ||
+                    msg.message?.extendedTextMessage?.text ||
+                    msg.message?.buttonsResponseMessage?.selectedButtonId;
+
+                if (!text || !text.startsWith(prefix)) {
+                    // If it's not a command, we are done processing this message after auto-reads/views
+                    if (autoTypingIndicatorEnabled && !msg.key.fromMe) {
+                        await sock.sendPresenceUpdate('paused', from);
+                        console.log(`DEBUG: Sent 'paused' presence to ${from} (non-command).`);
+                    }
+                    continue; // Skip to next message in loop
+                }
+
+                const args = text.slice(prefix.length).trim().split(/ +/);
+                const commandName = args.shift().toLowerCase();
+                const command = commandList[commandName];
+
+                if (command) {
+                    const originalSendMessage = sock.sendMessage;
+                    sock.sendMessage = async (jid, content, options) => {
+                        let finalContent = { ...content };
+                        if (botSignatureEnabled) {
+                            if (finalContent.text) {
+                                finalContent.text += botSignatureText;
+                            } else if (finalContent.caption) {
+                                finalContent.caption += botSignatureText;
+                            }
+                        }
+                        return originalSendMessage.call(sock, jid, finalContent, options);
+                    };
+
+                    await command(sock, msg, from, args);
+                    sock.sendMessage = originalSendMessage; // Restore original after command execution
+
+                    const randomEmoji = reactionEmojis[Math.floor(Math.random() * reactionEmojis.length)];
+                    await sock.sendMessage(from, {
+                        react: {
+                            text: randomEmoji,
+                            key: msg.key
+                        }
+                    });
+                    console.log(`DEBUG: Sent reaction ${randomEmoji} for command.`);
+
+                } else {
+                    console.log(`🚫 Unknown command: ${commandName}`);
+                }
+
+            } catch (err) {
+                console.error('⚠️ Error handling message:', err);
+                if (autoTypingIndicatorEnabled && !msg.key.fromMe) {
+                    await sock.sendPresenceUpdate('paused', from);
+                    console.log(`DEBUG: Sent 'paused' presence to ${from} (on error).`);
+                }
             }
         }
     });
 };
 
-// Export utilities
 export const commandMap = commands;
