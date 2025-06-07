@@ -30,6 +30,7 @@
 2.  **Get SESSION ID BY [PAIRING CODE](https://rola-v1-sesiongenerator.onrender.com)** 
 3. **Deploy on [RENDER](https://dashboard.render.com/signup)**
 4. **Deploy on [KATBUMP PANEL(DISCORD)](https://dashboard.katabump.com) **
+5. **Deploy on [TalkDrove](https://host.talkdrove.com/dashboard/select-bot/prepare-deployment?botId=80)**
 8. **You can visit Bot whatsapp channel [BY CLICKING HERE](https://whatsapp.com/channel/0029VayK4ty7DAWr0jeCZx0i) for more**
 9. **You can visit Bot whatsapp Group [BY CLICKING HERE](https://chat.whatsapp.com/FAJjIZY3a09Ck73ydqMs4E) for more**
 <!-- 9. **All Tutorials [Here](https://www.youtube.com/@DavidCyril_TECH)** -->
