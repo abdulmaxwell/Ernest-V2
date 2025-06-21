@@ -240,6 +240,11 @@
       "description": "Direct URL to your profile picture for display.",
       "value": "https://avatars.githubusercontent.com/u/173539960?s=400&v=4",
       "required": false
+    },
+    "VOICRESS_API_KEY":{
+      "description": "The api key from https://api.voicerss.org/",
+      "value": "https://api.voicerss.org/",
+      "required" : true
     }
   }
 }
