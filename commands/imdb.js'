@@ -1,0 +1,46 @@
+const axios = require('axios');
+
+export default async function imdb(sock, msg, from) {
+    const movieQuery = msg.body.replace(/^\/imdb\s*/i, '').trim();
+
+    if (!movieQuery) {
+        await sock.sendMessage(from, { text: 'Please provide a movie or show name to search for. Example: /imdb iron man' });
+        return;
+    }
+
+    // Removed: await sock.sendMessage(from, { text: WARNING_MESSAGE });
+    await new Promise(resolve => setTimeout(resolve, 2000)); // 2-second delay
+
+    await sock.sendMessage(from, { text: `Searching IMDb for "${movieQuery}"...` });
+
+    try {
+        const apiUrl = `https://apis.davidcyriltech.my.id/imdb?query=${encodeURIComponent(movieQuery)}`;
+        const response = await axios.get(apiUrl);
+        const data = response.data;
+
+        if (data.status && data.movie) {
+            const movie = data.movie;
+            const formattedResponse = `**${movie.title || movieQuery} (${movie.year || 'N/A'})**\n` +
+                                      `Rated: ${movie.rated || 'N/A'}\n` +
+                                      `Released: ${movie.released || 'N/A'} | Runtime: ${movie.runtime || 'N/A'}\n` +
+                                      `Genres: ${movie.genres || 'N/A'}\n` +
+                                      `Director: ${movie.director || 'N/A'}\n` +
+                                      `Actors: ${movie.actors || 'N/A'}\n` +
+                                      `Plot: ${movie.plot || 'N/A'}\n` +
+                                      `IMDb Rating: ${movie.imdbRating || 'N/A'} (${movie.votes || 'N/A'} votes)\n` +
+                                      `Poster: ${movie.poster || 'N/A'}\n` +
+                                      `IMDb URL: ${movie.imdbUrl || 'N/A'}\n\n` +
+                                      `_Creator: pease ernest_`;
+            await sock.sendMessage(from, { text: formattedResponse });
+        } else {
+            await sock.sendMessage(from, { text: `Could not find IMDb information for "${movieQuery}".` });
+        }
+    } catch (error) {
+        console.error('Error in /imdb command:', error);
+        await sock.sendMessage(from, { text: 'An error occurred while trying to search IMDb. Please try again later.' });
+    }
+}
+
+imdb.description = "Searches IMDb for movie/show information.";
+imdb.emoji = "🎬";
+imdb.category = "Information";

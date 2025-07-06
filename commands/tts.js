@@ -1,94 +1,57 @@
-// commands/tts.js
-import fs from 'fs/promises'; // Use fs.promises for async file operations
-import path from 'path';
-import { fileURLToPath } from 'url';
-import axios from 'axios'; // Import axios instead of node-fetch
+const axios = require('axios');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+export default async function tts(sock, msg, from) {
+    const args = msg.body.slice('/tts'.length).trim().split(' ');
+    let text = '';
+    let voice = 'Bianca'; // Default voice for your API
 
-// IMPORTANT: Replace with a real TTS API endpoint and API Key if required.
-// For demonstration, this is a placeholder. A simple free one might be available,
-// but often have limitations. For production, consider Google Cloud TTS, IBM Watson, etc.
-const TTS_API_BASE_URL = 'https://api.voicerss.org/'; // Example placeholder
-const TTS_API_KEY = process.env.VOICE_RSS_API_KEY || 'YOUR_VOICERSS_API_KEY_HERE'; // Get an API key if using VoiceRSS or similar
+    // Check if the last arg is a specific voice like "voice=xyz"
+    const lastArg = args[args.length - 1];
+    if (lastArg && lastArg.toLowerCase().startsWith('voice=')) {
+        voice = lastArg.substring('voice='.length);
+        text = args.slice(0, -1).join(' '); // Remove voice part from text
+    } else {
+        text = args.join(' '); // If no voice specified, all args are text
+    }
 
-export default async function tts(sock, msg, from, args) {
-    const textToSpeak = args.join(' ');
-
-    if (!textToSpeak) {
-        await sock.sendMessage(from, { text: "Please provide text to convert to audio. Example: `.say Hello there, I am Peace Ernest`" });
+    if (!text) {
+        await sock.sendMessage(from, { text: 'Please provide text to convert to speech. Example: /tts Hello world' });
         return;
     }
 
+    await new Promise(resolve => setTimeout(resolve, 2000)); // 2-second delay
+
+    let voiceMessage = `Converting text to speech (Voice: ${voice})...`;
+    if (voice === 'Bianca') {
+        voiceMessage += `\n_Note: 'Bianca' is the default voice. Other voices may be available but are not officially supported or listed by Ernest Tech House._`;
+    } else {
+        voiceMessage += `\n_Note: You've requested voice '${voice}'. If this voice does not work, it might not be supported by the third-party API. Try again without specifying a voice, or try 'voice=Bianca'._`;
+    }
+    await sock.sendMessage(from, { text: voiceMessage });
+
     try {
-        await sock.sendPresenceUpdate('recording', from); // Indicate recording status
+        const apiUrl = `https://apis.davidcyriltech.my.id/tts?text=${encodeURIComponent(text)}&voice=${encodeURIComponent(voice)}`;
+        const response = await axios.get(apiUrl);
+        const data = response.data;
 
-        // Construct the URL and parameters for the TTS API
-        // This is highly dependent on the chosen TTS API.
-        // For VoiceRSS, parameters are typically sent via query string.
-        const params = {
-            key: TTS_API_KEY,
-            hl: 'en-us',
-            src: textToSpeak,
-            c: 'OGG' // OGG for Opus encoding, suitable for WhatsApp voice notes
-        };
-
-        const response = await axios.get(TTS_API_BASE_URL, {
-            params: params,
-            responseType: 'arraybuffer' // Important for Axios to get binary data as a Buffer
-        });
-
-        if (response.status !== 200) {
-            console.error(`TTS API Error: ${response.status} - ${response.data ? new TextDecoder().decode(response.data) : 'No response data'}`);
-            await sock.sendMessage(from, { text: "Failed to convert text to audio. The TTS service returned an error." });
-            return;
-        }
-
-        const audioBuffer = Buffer.from(response.data); // Axios's response.data is an ArrayBuffer, convert to Node.js Buffer
-        const outputPath = path.join(__dirname, `../temp_audio_${Date.now()}.ogg`); // Use .ogg for Opus
-
-        await fs.writeFile(outputPath, audioBuffer);
-
-        await sock.sendMessage(from, {
-            audio: { url: outputPath },
-            mimetype: 'audio/ogg',
-            ptt: true // This marks it as a voice message (Push To Talk)
-        });
-
-        await fs.unlink(outputPath); // Clean up the temporary file
-        console.log(`Successfully sent TTS audio for: "${textToSpeak}"`);
-
-    } catch (error) {
-        console.error('Error in TTS command:', error);
-        // More specific error handling for Axios:
-        if (axios.isAxiosError(error)) {
-            if (error.response) {
-                // The request was made and the server responded with a status code
-                // that falls out of the range of 2xx
-                console.error('Axios Response Error Data:', error.response.data ? new TextDecoder().decode(error.response.data) : 'No data');
-                console.error('Axios Response Status:', error.response.status);
-                console.error('Axios Response Headers:', error.response.headers);
-                await sock.sendMessage(from, { text: `TTS service error: ${error.response.status}. Please check your API key or the text.` });
-            } else if (error.request) {
-                // The request was made but no response was received
-                console.error('Axios Request Error:', error.request);
-                await sock.sendMessage(from, { text: "Could not reach the TTS service. Please check your internet connection or the API URL." });
-            } else {
-                // Something happened in setting up the request that triggered an Error
-                console.error('Axios Setup Error:', error.message);
-                await sock.sendMessage(from, { text: "An internal error occurred with the TTS request setup." });
-            }
+        if (data.success && data.audioUrl) {
+            const formattedResponse = `Here is your audio: ${data.audioUrl}\n\n` +
+                                      `_Creator: pease ernest_`;
+            await sock.sendMessage(from, { text: formattedResponse });
         } else {
-            await sock.sendMessage(from, { text: "An unexpected error occurred while processing your request." });
+            // Provide more specific feedback if the voice might be the issue
+            let errorMessage = `Could not generate speech for "${text}". The service might be unavailable.`;
+            if (voice !== 'Bianca') {
+                errorMessage += ` If you specified a voice (${voice}), it might not be supported. Try again with just the text.`;
+            }
+            await sock.sendMessage(from, { text: errorMessage });
         }
-    } finally {
-        await sock.sendPresenceUpdate('paused', from); // Revert presence
+    } catch (error) {
+        console.error('Error in /tts command:', error);
+        await sock.sendMessage(from, { text: 'An error occurred while trying to generate speech. Please try again later.' });
     }
 }
 
-export const description = "Converts text to an audio voice note.";
-export const category = "Utility";
-
-tts.description = "Converts text to an audio voice note.";
+tts.description = "Converts text to speech. Usage: /tts <text> [voice=name]";
+tts.emoji = "🔊";
 tts.category = "Utility";

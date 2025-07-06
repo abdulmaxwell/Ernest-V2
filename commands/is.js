@@ -4,3 +4,4 @@ export default async function test(sock, msg, from) {
 
 test.description = "Test command";
 test.emoji = "🧪";
+test.category = "test";
