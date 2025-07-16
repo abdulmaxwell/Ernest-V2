@@ -1,4 +1,4 @@
-const axios = require('axios');
+import axios from 'axios';
 
 export default async function song(sock, msg, from) {
     const songQuery = msg.body.replace(/^\/song\s*/i, '').trim();

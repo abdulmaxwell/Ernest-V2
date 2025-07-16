@@ -1,5 +1,4 @@
-const axios = require('axios');
-
+import axios from 'axios';
 export default async function fbdown(sock, msg, from) {
     const videoUrl = msg.body.replace(/^\/fbdown\s*/i, '').trim();
 

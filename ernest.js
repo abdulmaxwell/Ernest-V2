@@ -1,33 +1,38 @@
-import {
+// ernest.js
+import dotenv from "dotenv";
+dotenv.config(); // Ensure this is at the very top to load env variables first
+
+// Recommended Baileys import style for ES Modules
+import pkg from "@whiskeysockets/baileys";
+const {
     makeWASocket,
     useMultiFileAuthState,
     DisconnectReason,
     Browsers,
     jidNormalizedUser // Import for normalizing JIDs
-} from "@whiskeysockets/baileys";
+} = pkg;
+
 import pino from "pino";
 import fs from "fs/promises";
-import dotenv from "dotenv";
+
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { messageHandler } from "./handlers/messageHandler.js";
+import { messageHandler } from "./handlers/messageHandler.js"; // This imports the function
 import express from "express";
 import { initScheduler } from './lib/scheduler.js';
 import { readdir } from 'fs/promises'; // Import readdir for counting commands
 
-// Configure environment
-dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Configuration
 const config = {
     AUTH_FOLDER: join(__dirname, "data", "auth_state"),
-    LOG_FILE: join(__dirname, "bot.log"),
+    LOG_FILE: join(__dirname, "bot.log"), // This variable is defined but not used for pino.logger
     MAX_RETRIES: 5,
     RETRY_DELAY: 5000,
     PORT: process.env.PORT || 3000,
-    BOT_VERSION: process.env.BOT_VERSION || "2.1.0" // Use .env for bot version
+    BOT_VERSION: process.env.BOT_VERSION || "2.1.0"
 };
 
 // Ensure auth directory exists
@@ -43,7 +48,7 @@ async function ensureAuthFolder() {
 
 // Logger setup
 const logger = pino({
-    level: process.env.LOG_LEVEL || "debug", // Use LOG_LEVEL from .env
+    level: process.env.LOG_LEVEL || "debug",
     transport: {
         target: "pino-pretty",
         options: {
@@ -63,13 +68,13 @@ async function initializeSession() {
     }
 
     try {
+        // Decode and write session data
         const decoded = Buffer.from(process.env.WHATSAPP_SESSION, "base64").toString("utf-8");
         const session = JSON.parse(decoded);
         const credsPath = join(config.AUTH_FOLDER, "creds.json");
 
         await fs.writeFile(credsPath, JSON.stringify(session, null, 2));
         logger.info("✅ Session initialized from environment variable.");
-
         return true;
     } catch (err) {
         logger.error("❌ Session initialization failed. Check WHATSAPP_SESSION format:", err);
@@ -82,7 +87,7 @@ class WhatsAppBot {
     constructor() {
         this.sock = null;
         this.retryCount = 0;
-        this.afkUsers = new Map();
+        this.afkUsers = new Map(); // Keep this if you have AFK features (not used by messageHandler directly)
         this.app = express();
     }
 
@@ -90,7 +95,14 @@ class WhatsAppBot {
         logger.info("🚀 Starting Ernest Tech House Bot...");
         try {
             await ensureAuthFolder();
-            await initializeSession();
+            // Only try to initialize session from env if creds.json doesn't exist
+            const credsPath = join(config.AUTH_FOLDER, "creds.json");
+            const credsExist = await fs.access(credsPath).then(() => true).catch(() => false);
+            if (!credsExist) {
+                 await initializeSession(); // Only initialize if no existing session
+            } else {
+                 logger.info("Credentials found, skipping session initialization from WHATSAPP_SESSION.");
+            }
 
             this.setupExpressServer();
             await this.connectWhatsApp();
@@ -121,18 +133,20 @@ class WhatsAppBot {
 
         this.sock = makeWASocket({
             auth: state,
-            logger: pino({ level: "silent" }),
+            logger: pino({ level: "silent" }), // Keep silent for clean terminal
             browser: Browsers.macOS("Desktop"),
-            printQRInTerminal: false,
+            printQRInTerminal: false, // Set to true if you need QR in terminal for initial scan
             shouldSyncHistoryMessage: () => false,
             syncFullHistory: false,
-            markOnlineOnConnect: process.env.ALWAYS_ONLINE === 'true' // Use .env variable
+            markOnlineOnConnect: process.env.ALWAYS_ONLINE === 'true'
         });
 
         // Setup event handlers
         this.setupEventHandlers(saveCreds);
-        // Pass the full sock instance to messageHandler
-        messageHandler(this.sock, this.afkUsers);
+        // Pass the full sock instance to messageHandler.
+        // messageHandler does not need afkUsers passed directly as a param to its main function.
+        // If an AFK command needs it, it would access `bot.afkUsers` or be passed as a specific arg to that command.
+        messageHandler(this.sock); // Corrected: removed this.afkUsers from here
         initScheduler(this.sock);
 
         logger.info("✅ WhatsApp connection initialized. Awaiting 'open' status...");
@@ -141,8 +155,6 @@ class WhatsAppBot {
     setupEventHandlers(saveCreds) {
         logger.info("⚙️ Setting up WhatsApp event handlers...");
         this.sock.ev.on("connection.update", async (update) => {
-            // logger.debug("Connection update:", update); // Keep this for detailed connection debugging
-
             if (update.connection === "close") {
                 await this.handleDisconnection(update.lastDisconnect);
             }
@@ -164,6 +176,13 @@ class WhatsAppBot {
 
         if (code === DisconnectReason.loggedOut) {
             logger.error("Session logged out. ⚠️ Please generate a new WHATSAPP_SESSION.");
+            // Optionally, delete creds.json to force re-scan
+            try {
+                await fs.unlink(join(config.AUTH_FOLDER, "creds.json"));
+                logger.info("Deleted old creds.json. Please restart bot to generate new session.");
+            } catch (err) {
+                logger.error("Failed to delete creds.json:", err);
+            }
             return; // Do not retry if explicitly logged out
         }
 
@@ -183,43 +202,54 @@ class WhatsAppBot {
     }
 
     async sendConnectionNotification(userId) {
-        // --- Feature Status Checks (NEW) ---
+        // Normalize the owner JID for comparison and sending messages
+        const ownerJid = process.env.OWNER_NUMBER ? jidNormalizedUser(process.env.OWNER_NUMBER.split('@')[0]) : null;
+
+        // Only send notification if OWNER_NUMBER is set and valid
+        if (!ownerJid) {
+            logger.warn("OWNER_NUMBER not set or invalid in .env. Skipping connection notification.");
+            return;
+        }
+
         const getStatusEmoji = (envVar) => process.env[envVar] === 'true' ? '✅' : '❌';
-        const ownerJid = process.env.OWNER_NUMBER ? jidNormalizedUser(process.env.OWNER_NUMBER.trim()) : 'Not Set';
         const botName = process.env.BOT_NAME || 'ErnestBot';
 
         const autoReadStatus = getStatusEmoji('AUTO_READ_MESSAGES');
         const antiDeleteStatus = getStatusEmoji('ANTI_DELETE_ENABLED');
         const autoViewStatusStatus = getStatusEmoji('AUTO_VIEW_STATUS_ENABLED');
-        const sendStatusNotifStatus = getStatusEmoji('SEND_STATUS_VIEW_NOTIFICATION_ENABLED'); // New
+        const sendStatusNotifStatus = getStatusEmoji('SEND_STATUS_VIEW_NOTIFICATION_ENABLED');
         const autoViewChannelsStatus = getStatusEmoji('AUTO_VIEW_CHANNELS_ENABLED');
         const autoTypingStatus = getStatusEmoji('AUTO_TYPING_INDICATOR_ENABLED');
-        const specialAlertsStatus = (process.env.SPECIAL_CONTACT_ALERTS && process.env.SPECIAL_CONTACT_ALERTS.length > 0) ? '✅' : '❌';
+
+        // Check SPECIAL_CONTACT_ALERTS differently as it's a list
+        const specialAlertsList = process.env.SPECIAL_CONTACT_ALERTS;
+        const specialAlertsStatus = (specialAlertsList && specialAlertsList.split(',').filter(Boolean).length > 0) ? '✅' : '❌';
+
         const alwaysOnlineStatus = getStatusEmoji('ALWAYS_ONLINE');
         const botSignatureStatus = getStatusEmoji('BOT_SIGNATURE_ENABLED');
         const removeBgStatus = process.env.REMOVEBG_API_KEY && process.env.REMOVEBG_API_KEY !== 'YOUR_API_KEY' && process.env.REMOVEBG_API_KEY !== '' ? '✅' : '❌';
         const pythonApiStatus = process.env.PYTHON_API_URL && process.env.PYTHON_API_URL !== 'http://localhost:5000' && process.env.PYTHON_API_URL !== '' ? '✅' : '❌';
-        const weatherApiStatus = process.env.WEATHER_API_KEY && process.env.WEATHER_API_KEY !== 'YOUR_WEATHER_API_KEY' && process.env.WEATHER_API_KEY !== '' ? '✅' : '❌'; // New
+        const weatherApiStatus = process.env.WEATHER_API_KEY && process.env.WEATHER_API_KEY !== 'YOUR_WEATHER_API_KEY' && process.env.WEATHER_API_KEY !== '' ? '✅' : '❌';
+        const geminiApiStatus = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'YOUR_GEMINI_API_KEY' && process.env.GEMINI_API_KEY !== '' ? '✅' : '❌'; // New
+        const voiceRssApiStatus = process.env.VOICE_RSS_API_KEY && process.env.VOICE_RSS_API_KEY !== 'YOUR_VOICE_RSS_API_KEY' && process.env.VOICE_RSS_API_KEY !== '' ? '✅' : '❌'; // New
 
-        // Count commands for dynamic display
         let commandCount = 'N/A';
         try {
             const files = await readdir(join(__dirname, 'commands'));
             commandCount = files.filter(file => file.endsWith('.js')).length;
         } catch (e) {
-            console.error("Error counting commands:", e);
+            logger.error("Error counting commands:", e);
         }
-        // --- END Feature Status Checks ---
 
         const message = `
 ╔═══════════════════════════════════════════╗
-║         *${botName.toUpperCase()} - SYSTEM ONLINE* ║
+║         *${botName.toUpperCase()} - SYSTEM ONLINE* ║
 ╠═══════════════════════════════════════════╣
-║ 👑 Owner: ${(ownerJid.split('@')[0] || 'Not Set').padEnd(25)} ║
+║ 👑 Owner: ${(ownerJid ? ownerJid.split('@')[0] : 'Not Set').padEnd(25)} ║
 ║ 🤖 Version: ${config.BOT_VERSION.padEnd(25)} ║
 ║ ⚡ Commands Loaded: ${String(commandCount).padEnd(16)} ║
 ╠═══════════════════════════════════════════╣
-║           *FEATURE STATUS* ║
+║           *FEATURE STATUS* ║
 ╠═══════════════════════════════════════════╣
 ║ ${autoReadStatus} Auto-Read Msgs: ${(autoReadStatus === '✅' ? 'Enabled' : 'Disabled').padEnd(20)} ║
 ║ ${antiDeleteStatus} Anti-Delete: ${(antiDeleteStatus === '✅' ? 'Enabled' : 'Disabled').padEnd(22)} ║
@@ -232,10 +262,13 @@ class WhatsAppBot {
 ║ ${removeBgStatus} RemoveBG API: ${(removeBgStatus === '✅' ? 'Active' : 'Inactive').padEnd(20)} ║
 ║ ${pythonApiStatus} Python API: ${(pythonApiStatus === '✅' ? 'Active' : 'Inactive').padEnd(22)} ║
 ║ ${weatherApiStatus} Weather API: ${(weatherApiStatus === '✅' ? 'Active' : 'Inactive').padEnd(21)} ║
+║ ${geminiApiStatus} Gemini API: ${(geminiApiStatus === '✅' ? 'Active' : 'Inactive').padEnd(22)} ║
+║ ${voiceRssApiStatus} VoiceRSS API: ${(voiceRssApiStatus === '✅' ? 'Active' : 'Inactive').padEnd(19)} ║
 ╚═══════════════════════════════════════════╝
             `.trim();
 
-        await this.sock.sendMessage(userId, { text: message });
+        // Send to owner's JID
+        await this.sock.sendMessage(ownerJid, { text: message });
         logger.info("✅ Sent bot connection notification to owner.");
     }
 

@@ -68,31 +68,26 @@ export default async function menu(sock, msg, from, args) {
 
         // Build the menu
         let menuText = '';
-        
-        // Header
-        menuText += `╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮\n`;
-        menuText += `┃        🤖 *${botName.toUpperCase()}* 🤖        ┃\n`;
-        menuText += `╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n`;
+        menuText += `╭━━━━━━━❰ *${botName.toUpperCase()}* ❱━━━━━━━╮\n`;
+        menuText += `┃             *MENU CARD*             ┃\n`;
+        menuText += `┃  ┌─────────────┐  ┌─────────────┐  ┃\n`;
+        menuText += `┃  │  🤖 BOT INFO  │  │  📊 USER INFO  │  ┃\n`;
+        menuText += `┃  └─────────────┘  └─────────────┘  ┃\n`;
+        menuText += `┃  👑 Owner: wa.me/${ownerNumber}         ┃\n`;
+        menuText += `┃  👤 User: *${userName}*               ┃\n`;
+        menuText += `┃  🕐 Time: *${currentTime}*             ┃\n`;
+        menuText += `┃  📱 Chat: ${isGroup ? '*Group Chat*' : '*Private Chat*'} ┃\n`;
+        menuText += `┃  ⚙️ Prefix: *${prefix}*                ┃\n`;
+        menuText += `┃  📋 Total Commands: *${totalCommands}* ┃\n`;
+        menuText += `╰━━━━━━━❰ *COMMANDS* ❱━━━━━━━╮\n\n`;
 
-        // User info section
-        menuText += `╭─────「 *📊 SESSION INFO* 」─────╮\n`;
-        menuText += `┃ 👤 User: *${userName}*\n`;
-        menuText += `┃ 🕐 Time: *${currentTime}*\n`;
-        menuText += `┃ 📱 Chat: ${isGroup ? '*Group Chat*' : '*Private Chat*'}\n`;
-        menuText += `┃ ⚙️ Prefix: *${prefix}*\n`;
-        menuText += `┃ 📋 Total Commands: *${totalCommands}*\n`;
-        menuText += `┃ 👑 Owner: wa.me/${ownerNumber}\n`;
-        menuText += `╰──────────────────────────────╯\n\n`;
-
-        // Commands by category
         for (const category of sortedCategories) {
             const cmds = categorized[category];
             const emoji = categoryEmojis[category] || '📁';
             const categoryName = category.charAt(0).toUpperCase() + category.slice(1);
             
-            menuText += `╭─────「 *${emoji} ${categoryName.toUpperCase()}* 」─────╮\n`;
+            menuText += `╭────❰ *${emoji} ${categoryName.toUpperCase()}* ❱────╮\n`;
             
-            // Sort commands alphabetically
             cmds.sort((a, b) => a.cmd.localeCompare(b.cmd));
             
             for (const { cmd, description } of cmds) {
@@ -100,19 +95,17 @@ export default async function menu(sock, msg, from, args) {
                 const truncatedDesc = description.length > 40 ? 
                     description.substring(0, 37) + '...' : description;
                 
-                menuText += `┃ ▸ *${commandText}*\n`;
-                menuText += `┃   └ _${truncatedDesc}_\n`;
+                menuText += `┃ ▸ *${commandText}* - _${truncatedDesc}_\n`;
             }
             menuText += `╰──────────────────────────────╯\n\n`;
         }
 
-        // Footer with tips
-        menuText += `╭─────「 *💡 QUICK TIPS* 」─────╮\n`;
+        menuText += `╭━━━━━━━❰ *QUICK TIPS* ❱━━━━━━━╮\n`;
         menuText += `┃ • Type *${prefix}help <command>* for details\n`;
         menuText += `┃ • Use *${prefix}menu info* for bot info\n`;
         menuText += `┃ • Commands work in groups & DM\n`;
         menuText += `┃ • Bot updates regularly!\n`;
-        menuText += `╰──────────────────────────────╯\n\n`;
+        menuText += `╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n`;
 
         menuText += `🚀 *Powered by Ernest Tech House*\n`;
         menuText += `⚡ _Fast • Reliable • Always Improving_\n`;

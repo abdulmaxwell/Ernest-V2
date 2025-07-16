@@ -1,5 +1,5 @@
-const axios = require('axios');
 
+import axios from 'axios';
 export default async function apk(sock, msg, from) {
     const appName = msg.body.replace(/^\/apk\s*/i, '').trim();
 

@@ -1,15 +1,21 @@
-// messageHandler.js
+// handlers/messageHandler.js
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import dotenv from 'dotenv';
-import { antidelete } from './antidelete.js';
-import { jidNormalizedUser } from '@whiskeysockets/baileys'; // Keep this import!
+// import dotenv from 'dotenv'; // This line is likely redundant if you have 'import dotenv/config;' in your main bot file
+// dotenv.config(); // This line is likely redundant here if you have 'import dotenv/config;' in your main bot file
 
-// Import the new specialAlerts handler
+// Corrected Baileys import:
+import pkg from '@whiskeysockets/baileys'; // Import the whole package as 'pkg'
+const { jidNormalizedUser, getContentType } = pkg; // Destructure needed functions from 'pkg'
+
+import { handleAntiDelete } from './antiDeleteHandler.js';
+import messageStorage from '../data/messageStorage.js';
+import specialContactsStorage from '../data/specialContactsStorage.js';
 import { handleSpecialAlert } from './specialAlerts.js';
 
-dotenv.config();
+// If you insist on dotenv.config() being here, ensure it's at the very top of this file
+// However, the best practice for ESM is to have `import 'dotenv/config';` in your main entry file.
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,10 +71,8 @@ export const messageHandler = async (sock) => {
     const autoTypingIndicatorEnabled = process.env.AUTO_TYPING_INDICATOR_ENABLED === 'true';
 
     // Special Contact Alerts
-    const specialContactAlertsEnabled = process.env.SPECIAL_CONTACT_ALERTS && process.env.SPECIAL_CONTACT_ALERTS.length > 0;
-    const specialContactJids = specialContactAlertsEnabled
-        ? process.env.SPECIAL_CONTACT_ALERTS.split(',').map(num => jidNormalizedUser(`${num}@s.whatsapp.net`))
-        : [];
+    const specialContactAlertsEnabled = process.env.SPECIAL_CONTACT_ALERTS_ENABLED === 'true';
+
     // --- End Configuration Variables ---
 
     // --- Emojis for Command Reactions ---
@@ -100,13 +104,18 @@ export const messageHandler = async (sock) => {
         console.log("INFO: Auto-typing indicator on incoming messages is DISABLED.");
     }
     if (specialContactAlertsEnabled) {
-        console.log("INFO: Special contact alerts are ENABLED.");
-        console.log("INFO: Special contacts:", specialContactJids.map(jid => jid.split('@')[0]).join(', '));
+        console.log("INFO: Special contact alerts are ENABLED via .env. List will be dynamic.");
     } else {
-        console.log("INFO: Special contact alerts are DISABLED.");
+        console.log("INFO: Special contact alerts are DISABLED via .env.");
     }
     // --- End Logging Initial States ---
 
+    // Initialize ALL storage modules once during bot startup
+    await messageStorage.initialize();
+    await specialContactsStorage.initialize();
+
+    // Schedule pruning of old messages (e.g., daily)
+    setInterval(() => messageStorage.pruneOldMessages(7), 24 * 60 * 60 * 1000); // Prune messages older than 7 days daily
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
@@ -115,7 +124,7 @@ export const messageHandler = async (sock) => {
             const from = msg.key.remoteJid;
             if (!from) continue;
 
-            const botJid = sock.user.id; // Get bot's own JID
+            const botJid = sock.user.id;
 
             // --- Show Typing Indicator Immediately (if enabled and not from bot) ---
             if (autoTypingIndicatorEnabled && !msg.key.fromMe) {
@@ -124,7 +133,7 @@ export const messageHandler = async (sock) => {
             }
 
             try {
-                let messageHandledByAutoFeatures = false; // Flag to know if message was processed by specific auto-features
+                let messageHandledByAutoFeatures = false;
 
                 // --- 1. Handle Status Messages ---
                 if (from === 'status@broadcast') {
@@ -151,42 +160,56 @@ export const messageHandler = async (sock) => {
                     }
                     messageHandledByAutoFeatures = true;
                 }
-                
+
                 // --- 3. Handle General Auto-Read (for all other messages, if not from bot or already handled by status/channel) ---
                 if (autoReadGeneralEnabled && !msg.key.fromMe && !messageHandledByAutoFeatures) {
                     await sock.readMessages([msg.key], 'read');
                     console.log(`DEBUG: General auto-read message from ${from} (ID: ${msg.key.id}).`);
-                    messageHandledByAutoFeatures = true; // Mark as handled
+                    messageHandledByAutoFeatures = true;
                 }
 
-                // --- 4. Special Contact Alert (only if message is from a special contact and NOT from bot itself) ---
-                if (specialContactAlertsEnabled && !msg.key.fromMe) { // We check if specialContactJids includes `from` inside the handler
-                    await handleSpecialAlert(sock, msg, from, specialContactJids, botJid);
+                // --- 4. Special Contact Alert ---
+                if (specialContactAlertsEnabled && !msg.key.fromMe && specialContactsStorage.hasContact(jidNormalizedUser(from))) {
+                    await handleSpecialAlert(sock, msg, from, specialContactsStorage.getAllContacts(), botJid);
                 }
-
 
                 // --- 5. Handle Antidelete ---
-                await antidelete(sock, msg);
+                const handledByAntiDelete = await handleAntiDelete(sock, msg);
+                if (handledByAntiDelete === false && msg.message?.protocolMessage?.type === 'REVOKE') {
+                    if (autoTypingIndicatorEnabled && !msg.key.fromMe) {
+                        await sock.sendPresenceUpdate('paused', from);
+                        console.log(`DEBUG: Sent 'paused' presence to ${from} (anti-delete handled).`);
+                    }
+                    continue; // Stop processing this message if anti-delete handled a revocation
+                }
 
                 // --- 6. Handle Commands ---
-                const text = msg.message?.conversation ||
+                // Get message content from various possible locations
+                const messageContent = msg.message?.conversation ||
                     msg.message?.extendedTextMessage?.text ||
-                    msg.message?.buttonsResponseMessage?.selectedButtonId;
+                    msg.message?.buttonsResponseMessage?.selectedButtonId ||
+                    msg.message?.imageMessage?.caption ||
+                    msg.message?.videoMessage?.caption;
 
+                // Ensure it's a string and trim it
+                const text = typeof messageContent === 'string' ? messageContent.trim() : '';
+
+                // If not a text message or doesn't start with prefix, pause typing and continue
                 if (!text || !text.startsWith(prefix)) {
-                    // If it's not a command, we are done processing this message after auto-reads/views
                     if (autoTypingIndicatorEnabled && !msg.key.fromMe) {
                         await sock.sendPresenceUpdate('paused', from);
                         console.log(`DEBUG: Sent 'paused' presence to ${from} (non-command).`);
                     }
-                    continue; // Skip to next message in loop
+                    continue; // Skip to next message if it's not a command
                 }
 
+                // Parse command and arguments
                 const args = text.slice(prefix.length).trim().split(/ +/);
-                const commandName = args.shift().toLowerCase();
+                const commandName = args.shift().toLowerCase(); // Extract command name and remove from args
                 const command = commandList[commandName];
 
                 if (command) {
+                    // Temporarily override sendMessage to add signature
                     const originalSendMessage = sock.sendMessage;
                     sock.sendMessage = async (jid, content, options) => {
                         let finalContent = { ...content };
@@ -200,9 +223,12 @@ export const messageHandler = async (sock) => {
                         return originalSendMessage.call(sock, jid, finalContent, options);
                     };
 
-                    await command(sock, msg, from, args);
-                    sock.sendMessage = originalSendMessage; // Restore original after command execution
+                    // Execute the command, passing args array
+                    // The command function signature is now: (sock, msg, from, args, specialContactsStorage)
+                    await command(sock, msg, from, args, specialContactsStorage);
+                    sock.sendMessage = originalSendMessage; // Restore original sendMessage
 
+                    // Send random reaction emoji
                     const randomEmoji = reactionEmojis[Math.floor(Math.random() * reactionEmojis.length)];
                     await sock.sendMessage(from, {
                         react: {

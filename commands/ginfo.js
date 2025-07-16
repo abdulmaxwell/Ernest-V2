@@ -1,116 +1,69 @@
-const groupPattern = /https:\/\/chat\.whatsapp\.com\/([A-Za-z0-9]{22})/g;
+// commands/groupinfo.js
+// commands/ginfo.js
+import pkg from '@whiskeysockets/baileys';
+const { areJidsGroup, jidDecode } = pkg;
+// ...
+import logger from '../utilis/logger.js'; // Adjust path
 
-export default async function ginfo(sock, msg, from, args) {
+async function groupinfo(sock, msg, from, args) {
+    // --- Authorization Check (RECOMMENDED) ---
+    const ownerJid = process.env.BOT_OWNER_JID_FULL;
+    if (from !== ownerJid) {
+        await sock.sendMessage(from, { text: '🚫 You are not authorized to use this command.' });
+        logger.warn(`Unauthorized access attempt for !groupinfo by ${from}`);
+        return;
+    }
+    // --- End Authorization Check ---
+
+    if (!areJidsGroup(from)) {
+        await sock.sendMessage(from, { text: 'This command can only be used in a group chat.' });
+        return;
+    }
+
+    const groupJid = from;
     try {
-        console.log("🔍 Starting group info fetch...");
-        
-        // Get group link from args or quoted message
-        let groupLink = args[0];
-        
-        if (!groupLink && msg.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
-            const quotedText = msg.message.extendedTextMessage.contextInfo.quotedMessage.conversation ||
-                             msg.message.extendedTextMessage.contextInfo.quotedMessage.extendedTextMessage?.text;
-            groupLink = quotedText;
-        }
-        
-        if (!groupLink) {
-            console.log("❌ No group link provided");
-            return sock.sendMessage(from, { 
-                text: "❗ *Please provide a group invite link.*\n\nExample: `.ginfo https://chat.whatsapp.com/ABC123...`" 
-            }, { quoted: msg });
+        const groupMetadata = await sock.groupMetadata(groupJid);
+
+        if (!groupMetadata) {
+            await sock.sendMessage(from, { text: '❌ Could not retrieve group information.' });
+            return;
         }
 
-        console.log("🔗 Checking link:", groupLink);
+        const ownerNumber = jidDecode(groupMetadata.owner)?.user || 'Unknown';
+        const creationDate = new Date(groupMetadata.creation * 1000).toLocaleString();
+        const botJid = sock.user.id;
+        const botParticipant = groupMetadata.participants.find(p => p.id === botJid);
+        const botAdminStatus = botParticipant?.admin ? `(${botParticipant.admin})` : 'No';
 
-        // Extract invite code more reliably
-        const match = groupLink.match(/https:\/\/chat\.whatsapp\.com\/([A-Za-z0-9]{22})/);
-        
-        if (!match) {
-            console.log("❌ Invalid group link format");
-            return sock.sendMessage(from, { 
-                text: "⚠️ *That doesn't look like a valid WhatsApp group link.*\n\nMake sure it looks like: `https://chat.whatsapp.com/ABC123...`" 
-            }, { quoted: msg });
+        let info = `📊 *Group Info:*\n\n`;
+        info += `*Name:* ${groupMetadata.subject}\n`;
+        info += `*ID:* \`\`\`${groupMetadata.id}\`\`\`\n`;
+        info += `*Created By:* ${ownerNumber}\n`;
+        info += `*Creation Date:* ${creationDate}\n`;
+        info += `*Total Participants:* ${groupMetadata.size}\n`;
+        info += `*Bot is Admin:* ${botAdminStatus}\n`;
+        info += `*Restrict Settings:* ${groupMetadata.restrict ? 'Admins Only' : 'All Participants'}\n`;
+        info += `*Announce Settings:* ${groupMetadata.announce ? 'Admins Only' : 'All Participants'}\n`;
+        info += `*Join Approval:* ${groupMetadata.joinApprovalMode ? 'On' : 'Off'}\n`;
+        info += `*Ephemeral Messages:* ${groupMetadata.ephemeralDuration ? `${groupMetadata.ephemeralDuration / (60 * 60 * 24)} days` : 'Off'}\n`;
+
+        if (groupMetadata.desc) {
+            info += `\n*Description:*\n\`\`\`\n${groupMetadata.desc}\n\`\`\``;
+        } else {
+            info += `\n*Description:* None\n`;
         }
 
-        const inviteCode = match[1];
-        console.log("🔑 Extracted invite code:", inviteCode);
-
-        // Fetch group info with better error handling
-        console.log("📡 Fetching group info...");
-        const groupInfo = await sock.groupGetInviteInfo(inviteCode);
-
-        if (!groupInfo) {
-            console.log("❌ No group info returned");
-            return sock.sendMessage(from, { 
-                text: "🚫 *Could not retrieve group info.*\n\nPossible reasons:\n• Link expired\n• Group deleted\n• Invalid invite code" 
-            }, { quoted: msg });
-        }
-
-        console.log("✅ Group info received:", JSON.stringify(groupInfo, null, 2));
-
-        // Format creation date safely
-        let formattedDate = 'Unknown';
-        if (groupInfo.creation) {
-            try {
-                const creationDate = new Date(groupInfo.creation * 1000);
-                formattedDate = creationDate.toLocaleDateString('en-GB', {
-                    year: 'numeric',
-                    month: 'short',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-            } catch (dateError) {
-                console.log("⚠️ Date formatting error:", dateError);
-            }
-        }
-
-        // Format owner info safely
-        let ownerInfo = 'Unknown';
-        let ownerJid = null;
-        if (groupInfo.owner) {
-            ownerJid = groupInfo.owner;
-            const ownerNumber = groupInfo.owner.split('@')[0];
-            ownerInfo = `wa.me/${ownerNumber}`;
-        }
-
-        // Build info text
-        const infoText = `👥 *${groupInfo.subject || 'Unknown Group'}*\n\n` +
-            `👤 *Creator:* ${ownerInfo}\n` +
-            `🆔 *Group ID:* \`${groupInfo.id || 'Unknown'}\`\n` +
-            `🔕 *Announcements Only:* ${groupInfo.announce ? "Yes" : "No"}\n` +
-            `🔒 *Edit Restricted:* ${groupInfo.restrict ? "Yes" : "No"}\n` +
-            `📅 *Created:* ${formattedDate}\n` +
-            `👥 *Participants:* ${groupInfo.size || 'Unknown'}\n` +
-            (groupInfo.desc ? `\n📝 *Description:*\n${groupInfo.desc.trim()}` : '');
-
-        console.log("📤 Sending group info...");
-        
-        return await sock.sendMessage(from, {
-            text: infoText.trim(),
-            mentions: ownerJid ? [ownerJid] : []
-        }, { quoted: msg });
+        await sock.sendMessage(from, { text: info });
+        logger.info(`Provided group info for ${groupJid} to ${from}`);
 
     } catch (error) {
-        console.error("❌ ginfo error:", error);
-        console.error("❌ Error stack:", error.stack);
-        
-        let errorMsg = "❌ *Something went wrong while fetching group info.*\n\n";
-        
-        if (error.message?.includes('not-authorized')) {
-            errorMsg += "_Error:_ Not authorized to access this group info.";
-        } else if (error.message?.includes('item-not-found')) {
-            errorMsg += "_Error:_ Group not found or invite link expired.";
-        } else {
-            errorMsg += `_Error:_ ${error.message || error}`;
-        }
-        
-        return sock.sendMessage(from, { text: errorMsg }, { quoted: msg });
+        logger.error(`Error fetching group info for ${groupJid}:`, error);
+        await sock.sendMessage(from, { text: `❌ Failed to get group information. Error: ${error.message || 'Unknown error.'}` });
     }
 }
 
-export const description = "Fetches detailed info about a WhatsApp group via invite link";
-export const category = "group";
+groupinfo.description = 'Displays detailed information about the current group.';
+groupinfo.emoji = 'ℹ️';
+groupinfo.category = 'Group Management';
 
-ginfo.description = description;
-ginfo.category = category;
+export default groupinfo;

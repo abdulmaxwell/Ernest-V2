@@ -1,4 +1,4 @@
-const axios = require('axios');
+import axios from 'axios';
 
 export default async function ytmp4(sock, msg, from) {
     const videoUrl = msg.body.replace(/^\/ytmp4\s*/i, '').trim();

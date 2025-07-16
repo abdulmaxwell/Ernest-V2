@@ -1,4 +1,4 @@
-const axios = require('axios');
+import axios from 'axios';
 
 export default async function translate(sock, msg, from) {
     const args = msg.body.slice('/translate'.length).trim().split(' ');

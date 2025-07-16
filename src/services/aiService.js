@@ -1,9 +1,9 @@
-const axios = require('axios'); // Ensure axios is installed: npm install axios
+import axios from 'axios'; // Use ES Module import for axios too!
 
 // Base URL for your AI backend
 const BASE_URL = 'https://apis.davidcyriltech.my.id';
 
-async function getAiResponse(modelName, prompt) {
+export async function getAiResponse(modelName, prompt) { // <-- ADD 'export' HERE
     let url = '';
     let queryParam = 'text'; // Default query parameter
     let responseKey = 'result'; // Default key to extract result from JSON
@@ -29,7 +29,7 @@ async function getAiResponse(modelName, prompt) {
 
     try {
         const fullUrl = `${url}?${queryParam}=${encodeURIComponent(prompt)}`;
-        
+
         console.log(`Making request to: ${fullUrl}`); // For debugging
 
         const response = await axios.get(fullUrl);
@@ -48,12 +48,12 @@ async function getAiResponse(modelName, prompt) {
         if (!result || (typeof result === 'string' && result.trim().toLowerCase() === 'null') || result.trim() === '') {
             return `The AI model "${modelName}" did not provide a valid response for your prompt. Please try again with a different prompt or model.`;
         }
-        
+
         return result;
 
     } catch (error) {
         console.error(`Error interacting with ${modelName} (${url}) for prompt "${prompt}":`, error.message);
-        
+
         let errorMessage = `An error occurred while getting a response from ${modelName}.`;
 
         if (error.response) {
@@ -72,5 +72,3 @@ async function getAiResponse(modelName, prompt) {
         return errorMessage;
     }
 }
-
-module.exports = { getAiResponse };
