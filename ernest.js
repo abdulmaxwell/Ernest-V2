@@ -13,7 +13,7 @@ const {
 
 import pino from "pino";
 import fs from "fs/promises";
-import { TelegramBot } from "node-telegram-bot-api";
+import TelegramBot from 'node-telegram-bot-api';
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { messageHandler } from "./handlers/messageHandler.js";
