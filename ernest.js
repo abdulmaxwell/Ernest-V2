@@ -244,7 +244,7 @@ Use /restart to refresh the connection if needed.
         const chatId = msg.chat.id;
         const text = msg.text;
         
-        if (!this.pendingPairings.has(chatId) return;
+        if (!this.pendingPairings.has(chatId)) return;
         if (text.startsWith('/')) return;
         
         const pairingData = this.pendingPairings.get(chatId);
