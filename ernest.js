@@ -1,4 +1,3 @@
-// ernest.js
 import dotenv from "dotenv";
 dotenv.config(); // Ensure this is at the very top to load env variables first
 
@@ -14,13 +13,13 @@ const {
 
 import pino from "pino";
 import fs from "fs/promises";
-
+import { TelegramBot } from "node-telegram-bot-api";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { messageHandler } from "./handlers/messageHandler.js"; // This imports the function
+import { messageHandler } from "./handlers/messageHandler.js";
 import express from "express";
 import { initScheduler } from './lib/scheduler.js';
-import { readdir } from 'fs/promises'; // Import readdir for counting commands
+import { readdir } from 'fs/promises';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -28,20 +27,23 @@ const __dirname = dirname(__filename);
 // Configuration
 const config = {
     AUTH_FOLDER: join(__dirname, "data", "auth_state"),
-    LOG_FILE: join(__dirname, "bot.log"), // This variable is defined but not used for pino.logger
+    SESSIONS_FOLDER: join(__dirname, "data", "sessions"), // New folder for session storage
+    LOG_FILE: join(__dirname, "bot.log"),
     MAX_RETRIES: 5,
     RETRY_DELAY: 5000,
     PORT: process.env.PORT || 3000,
-    BOT_VERSION: process.env.BOT_VERSION || "2.1.0"
+    BOT_VERSION: process.env.BOT_VERSION || "2.1.0",
+    TELEGRAM_TOKEN: process.env.TELEGRAM_TOKEN // Telegram bot token
 };
 
-// Ensure auth directory exists
-async function ensureAuthFolder() {
+// Ensure directories exist
+async function ensureFolders() {
     try {
         await fs.mkdir(config.AUTH_FOLDER, { recursive: true });
-        logger.info("📁 Auth folder ensured.");
+        await fs.mkdir(config.SESSIONS_FOLDER, { recursive: true });
+        logger.info("📁 Folders ensured.");
     } catch (err) {
-        logger.error("❌ Failed to create auth folder:", err);
+        logger.error("❌ Failed to create folders:", err);
         process.exit(1);
     }
 }
@@ -59,57 +61,345 @@ const logger = pino({
     },
 });
 
-// Session management
-async function initializeSession() {
-    logger.info("🔑 Initializing WhatsApp session...");
-    if (!process.env.WHATSAPP_SESSION) {
-        logger.error("❌ WHATSAPP_SESSION environment variable not set. Please provide it.");
-        throw new Error("WHATSAPP_SESSION environment variable not set");
-    }
-
-    try {
-        // Decode and write session data
-        const decoded = Buffer.from(process.env.WHATSAPP_SESSION, "base64").toString("utf-8");
-        const session = JSON.parse(decoded);
-        const credsPath = join(config.AUTH_FOLDER, "creds.json");
-
-        await fs.writeFile(credsPath, JSON.stringify(session, null, 2));
-        logger.info("✅ Session initialized from environment variable.");
-        return true;
-    } catch (err) {
-        logger.error("❌ Session initialization failed. Check WHATSAPP_SESSION format:", err);
-        throw err;
-    }
-}
-
-// WhatsApp Bot Class
+// WhatsApp Bot Class with Telegram integration
 class WhatsAppBot {
     constructor() {
         this.sock = null;
         this.retryCount = 0;
-        this.afkUsers = new Map(); // Keep this if you have AFK features (not used by messageHandler directly)
+        this.afkUsers = new Map();
         this.app = express();
+        this.telegramBot = null;
+        this.activeSessions = new Map(); // Track active sessions
+        this.pendingPairings = new Map(); // Track pending pairing requests
     }
 
     async start() {
         logger.info("🚀 Starting Ernest Tech House Bot...");
         try {
-            await ensureAuthFolder();
-            // Only try to initialize session from env if creds.json doesn't exist
+            await ensureFolders();
+            
+            // Initialize Telegram bot if token is provided
+            if (config.TELEGRAM_TOKEN) {
+                await this.initTelegramBot();
+            } else {
+                logger.warn("Telegram token not provided. Telegram features disabled.");
+            }
+
             const credsPath = join(config.AUTH_FOLDER, "creds.json");
             const credsExist = await fs.access(credsPath).then(() => true).catch(() => false);
-            if (!credsExist) {
-                 await initializeSession(); // Only initialize if no existing session
+            
+            if (!credsExist && process.env.WHATSAPP_SESSION) {
+                await this.initializeSession();
+            } else if (!credsExist) {
+                logger.info("No existing session found. Waiting for pairing via Telegram.");
             } else {
-                 logger.info("Credentials found, skipping session initialization from WHATSAPP_SESSION.");
+                logger.info("Credentials found, connecting to WhatsApp...");
             }
 
             this.setupExpressServer();
-            await this.connectWhatsApp();
+            
+            // Connect to WhatsApp if we have credentials
+            if (credsExist) {
+                await this.connectWhatsApp();
+            }
 
         } catch (err) {
             logger.error("💥 Bot startup failed:", err);
             await this.handleRetry();
+        }
+    }
+
+    async initTelegramBot() {
+        logger.info("🤖 Initializing Telegram bot...");
+        this.telegramBot = new TelegramBot(config.TELEGRAM_TOKEN, { polling: true });
+
+        // Telegram bot commands
+        this.telegramBot.onText(/\/start/, (msg) => this.handleTelegramStart(msg));
+        this.telegramBot.onText(/\/pair/, (msg) => this.handleTelegramPair(msg));
+        this.telegramBot.onText(/\/status/, (msg) => this.handleTelegramStatus(msg));
+        this.telegramBot.onText(/\/list/, (msg) => this.handleTelegramListSessions(msg));
+        this.telegramBot.onText(/\/restart/, (msg) => this.handleTelegramRestart(msg));
+        this.telegramBot.on('message', (msg) => this.handleTelegramMessage(msg));
+
+        logger.info("✅ Telegram bot initialized.");
+    }
+
+    // Telegram command handlers
+    async handleTelegramStart(msg) {
+        const chatId = msg.chat.id;
+        const welcomeMessage = `
+🤖 *Welcome to WhatsApp Pairing Bot* 🤖
+
+This bot helps you manage your WhatsApp sessions.
+
+📌 *Available Commands:*
+/pair - Start a new WhatsApp pairing
+/status - Check current session status
+/list - List all saved sessions
+/restart - Restart the WhatsApp connection
+
+⚠️ *Note:* You need to pair only once. Sessions are saved automatically.
+`;
+        await this.telegramBot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown' });
+    }
+
+    async handleTelegramPair(msg) {
+        const chatId = msg.chat.id;
+        
+        // Check if already paired
+        const sessionPath = join(config.SESSIONS_FOLDER, `session_${chatId}.json`);
+        if (await fs.access(sessionPath).then(() => true).catch(() => false)) {
+            return this.telegramBot.sendMessage(chatId, "You already have a paired session. Use /restart if you need to reconnect.");
+        }
+
+        this.pendingPairings.set(chatId, { step: 'awaiting_number' });
+        
+        const promptMessage = `
+📱 *WhatsApp Pairing Process* 
+
+Please send your WhatsApp number in international format:
+- Include country code
+- No spaces or symbols
+- Example: 254712345678
+
+⚠️ *Important:* 
+- This must be the number of the phone with WhatsApp installed
+- You'll receive the pairing code here
+`;
+        
+        await this.telegramBot.sendMessage(chatId, promptMessage, { parse_mode: 'Markdown' });
+    }
+
+    async handleTelegramStatus(msg) {
+        const chatId = msg.chat.id;
+        const sessionPath = join(config.SESSIONS_FOLDER, `session_${chatId}.json`);
+        
+        if (!await fs.access(sessionPath).then(() => true).catch(() => false)) {
+            return this.telegramBot.sendMessage(chatId, "❌ No active session found. Use /pair to start pairing.");
+        }
+
+        const statusMessage = `
+📊 *Session Status*
+
+✅ Session exists and is saved
+🔗 WhatsApp connection: ${this.sock ? "Connected" : "Disconnected"}
+🔄 Auto-reconnect enabled
+
+Use /restart to refresh the connection if needed.
+`;
+        await this.telegramBot.sendMessage(chatId, statusMessage, { parse_mode: 'Markdown' });
+    }
+
+    async handleTelegramListSessions(msg) {
+        const chatId = msg.chat.id;
+        
+        try {
+            const files = await fs.readdir(config.SESSIONS_FOLDER);
+            const sessionFiles = files.filter(file => file.startsWith('session_') && file.endsWith('.json'));
+            
+            if (sessionFiles.length === 0) {
+                return this.telegramBot.sendMessage(chatId, "No saved sessions found.");
+            }
+            
+            let message = "📋 *Saved Sessions*\n\n";
+            sessionFiles.forEach(file => {
+                const sessionId = file.replace('session_', '').replace('.json', '');
+                message += `- Session ID: ${sessionId}\n`;
+            });
+            
+            await this.telegramBot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        } catch (error) {
+            logger.error("Error listing sessions:", error);
+            await this.telegramBot.sendMessage(chatId, "❌ Error listing sessions.");
+        }
+    }
+
+    async handleTelegramRestart(msg) {
+        const chatId = msg.chat.id;
+        const sessionPath = join(config.SESSIONS_FOLDER, `session_${chatId}.json`);
+        
+        if (!await fs.access(sessionPath).then(() => true).catch(() => false)) {
+            return this.telegramBot.sendMessage(chatId, "❌ No session found to restart. Use /pair first.");
+        }
+
+        try {
+            await this.telegramBot.sendMessage(chatId, "🔄 Restarting WhatsApp connection...");
+            
+            // Clean up existing connection
+            if (this.sock) {
+                await this.sock.end();
+                this.sock.ev.removeAllListeners();
+            }
+            
+            // Reconnect
+            await this.connectWhatsApp();
+            await this.telegramBot.sendMessage(chatId, "✅ WhatsApp connection restarted successfully.");
+        } catch (error) {
+            logger.error("Error restarting connection:", error);
+            await this.telegramBot.sendMessage(chatId, "❌ Failed to restart connection.");
+        }
+    }
+
+    async handleTelegramMessage(msg) {
+        const chatId = msg.chat.id;
+        const text = msg.text;
+        
+        if (!this.pendingPairings.has(chatId) return;
+        if (text.startsWith('/')) return;
+        
+        const pairingData = this.pendingPairings.get(chatId);
+        
+        if (pairingData.step === 'awaiting_number') {
+            const cleanNumber = text.replace(/[^0-9]/g, '');
+            
+            if (!cleanNumber || cleanNumber.length < 8) {
+                return this.telegramBot.sendMessage(chatId, '❌ Invalid number format. Please send your WhatsApp number in international format (e.g., 254712345678)');
+            }
+            
+            pairingData.number = cleanNumber;
+            pairingData.step = 'processing';
+            this.pendingPairings.set(chatId, pairingData);
+            
+            try {
+                await this.telegramBot.sendMessage(chatId, '⏳ Requesting pairing code from WhatsApp...');
+                
+                // Generate a unique ID for this session
+                const sessionId = `telegram_${chatId}`;
+                const sessionPath = join(config.AUTH_FOLDER, sessionId);
+                
+                // Create session directory
+                await fs.mkdir(sessionPath, { recursive: true });
+                
+                const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+                
+                // Create temporary WhatsApp connection
+                const sock = makeWASocket({
+                    auth: {
+                        creds: state.creds,
+                        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
+                    },
+                    printQRInTerminal: false,
+                    logger: pino({ level: "silent" }),
+                });
+                
+                // Store the socket for this pairing
+                pairingData.sock = sock;
+                pairingData.sessionPath = sessionPath;
+                pairingData.saveCreds = saveCreds;
+                this.pendingPairings.set(chatId, pairingData);
+                
+                // Handle connection updates
+                sock.ev.on("connection.update", async (update) => {
+                    if (update.connection === 'connecting') {
+                        if (!sock.authState.creds.registered) {
+                            try {
+                                const code = await sock.requestPairingCode(cleanNumber);
+                                await this.telegramBot.sendMessage(chatId, `🔢 Your WhatsApp pairing code:\n\n*${code}*\n\nEnter this in WhatsApp under:\nLinked Devices > Link with phone number`, { parse_mode: 'Markdown' });
+                            } catch (error) {
+                                logger.error("Pairing error:", error);
+                                await this.telegramBot.sendMessage(chatId, "❌ Failed to get pairing code. Please try again.");
+                                this.cleanupPairing(chatId);
+                            }
+                        }
+                    } else if (update.connection === "open") {
+                        // Session is connected
+                        await this.handleSuccessfulPairing(chatId, sock, sessionPath);
+                    } else if (update.connection === "close") {
+                        this.cleanupPairing(chatId);
+                    }
+                });
+                
+                // Save credentials when updated
+                sock.ev.on("creds.update", saveCreds);
+                
+            } catch (error) {
+                logger.error("Pairing error:", error);
+                await this.telegramBot.sendMessage(chatId, "❌ Failed to start pairing process. Please try again.");
+                this.cleanupPairing(chatId);
+            }
+        }
+    }
+
+    async handleSuccessfulPairing(chatId, sock, sessionPath) {
+        try {
+            // Read the credentials
+            const credsPath = join(sessionPath, 'creds.json');
+            const credsData = await fs.readFile(credsPath, 'utf-8');
+            const creds = JSON.parse(credsData);
+            
+            // Save the session for future use
+            const sessionSavePath = join(config.SESSIONS_FOLDER, `session_${chatId}.json`);
+            await fs.writeFile(sessionSavePath, credsData);
+            
+            // Store the active session
+            this.activeSessions.set(chatId, {
+                sock,
+                creds,
+                sessionPath
+            });
+            
+            // Notify user
+            await this.telegramBot.sendMessage(chatId, "✅ WhatsApp pairing successful! Your session has been saved.\n\nYou can now use /status to check your connection.");
+            
+            // Send welcome message via WhatsApp
+            const welcomeMessage = `
+┏━━━━━━━━━━━━━━━━━━━
+┃ Thank you for pairing with us!
+┃ Your session has been saved.
+┃ You won't need to pair again.
+┗━━━━━━━━━━━━━━━━━━━
+`;
+            await sock.sendMessage(sock.user.id, { text: welcomeMessage });
+            
+            // Clean up the pairing process
+            this.pendingPairings.delete(chatId);
+            
+            // If this is the first session, set it as the main connection
+            if (!this.sock) {
+                this.sock = sock;
+                this.setupEventHandlers(() => {});
+                messageHandler(sock);
+                initScheduler(sock);
+            }
+            
+        } catch (error) {
+            logger.error("Error handling successful pairing:", error);
+            await this.telegramBot.sendMessage(chatId, "❌ Error saving your session. Please try pairing again.");
+            this.cleanupPairing(chatId);
+        }
+    }
+
+    cleanupPairing(chatId) {
+        if (this.pendingPairings.has(chatId)) {
+            const pairingData = this.pendingPairings.get(chatId);
+            if (pairingData.sock) {
+                pairingData.sock.end().catch(() => {});
+            }
+            if (pairingData.sessionPath) {
+                fs.rm(pairingData.sessionPath, { recursive: true }).catch(() => {});
+            }
+            this.pendingPairings.delete(chatId);
+        }
+    }
+
+    async initializeSession() {
+        logger.info("🔑 Initializing WhatsApp session...");
+        if (!process.env.WHATSAPP_SESSION) {
+            logger.error("❌ WHATSAPP_SESSION environment variable not set.");
+            throw new Error("WHATSAPP_SESSION environment variable not set");
+        }
+
+        try {
+            const decoded = Buffer.from(process.env.WHATSAPP_SESSION, "base64").toString("utf-8");
+            const session = JSON.parse(decoded);
+            const credsPath = join(config.AUTH_FOLDER, "creds.json");
+
+            await fs.writeFile(credsPath, JSON.stringify(session, null, 2));
+            logger.info("✅ Session initialized from environment variable.");
+            return true;
+        } catch (err) {
+            logger.error("❌ Session initialization failed:", err);
+            throw err;
         }
     }
 
@@ -118,7 +408,9 @@ class WhatsAppBot {
         this.app.get("/health", (req, res) => {
             res.status(200).json({
                 status: "running",
-                connected: !!this.sock // Boolean check for connection status
+                connected: !!this.sock,
+                telegram: !!this.telegramBot,
+                sessions: this.activeSessions.size
             });
         });
 
@@ -133,23 +425,19 @@ class WhatsAppBot {
 
         this.sock = makeWASocket({
             auth: state,
-            logger: pino({ level: "silent" }), // Keep silent for clean terminal
+            logger: pino({ level: "silent" }),
             browser: Browsers.macOS("Desktop"),
-            printQRInTerminal: false, // Set to true if you need QR in terminal for initial scan
+            printQRInTerminal: false,
             shouldSyncHistoryMessage: () => false,
             syncFullHistory: false,
             markOnlineOnConnect: process.env.ALWAYS_ONLINE === 'true'
         });
 
-        // Setup event handlers
         this.setupEventHandlers(saveCreds);
-        // Pass the full sock instance to messageHandler.
-        // messageHandler does not need afkUsers passed directly as a param to its main function.
-        // If an AFK command needs it, it would access `bot.afkUsers` or be passed as a specific arg to that command.
-        messageHandler(this.sock); // Corrected: removed this.afkUsers from here
+        messageHandler(this.sock);
         initScheduler(this.sock);
 
-        logger.info("✅ WhatsApp connection initialized. Awaiting 'open' status...");
+        logger.info("✅ WhatsApp connection initialized.");
     }
 
     setupEventHandlers(saveCreds) {
@@ -175,15 +463,14 @@ class WhatsAppBot {
         logger.warn(`Connection closed (Code: ${code || "unknown"})`);
 
         if (code === DisconnectReason.loggedOut) {
-            logger.error("Session logged out. ⚠️ Please generate a new WHATSAPP_SESSION.");
-            // Optionally, delete creds.json to force re-scan
+            logger.error("Session logged out. ⚠️ Please generate a new session.");
             try {
                 await fs.unlink(join(config.AUTH_FOLDER, "creds.json"));
-                logger.info("Deleted old creds.json. Please restart bot to generate new session.");
+                logger.info("Deleted old creds.json.");
             } catch (err) {
                 logger.error("Failed to delete creds.json:", err);
             }
-            return; // Do not retry if explicitly logged out
+            return;
         }
 
         await this.handleRetry();
@@ -196,16 +483,24 @@ class WhatsAppBot {
 
         try {
             await this.sendConnectionNotification(user.id);
+            
+            // Notify Telegram users with active sessions
+            if (this.telegramBot) {
+                for (const [chatId, session] of this.activeSessions) {
+                    if (session.sock.user.id === user.id) {
+                        await this.telegramBot.sendMessage(chatId, 
+                            "✅ WhatsApp connection established successfully!\n\nYour session is now active.");
+                    }
+                }
+            }
         } catch (err) {
             logger.error("❌ Failed to send connection notification:", err);
         }
     }
 
     async sendConnectionNotification(userId) {
-        // Normalize the owner JID for comparison and sending messages
         const ownerJid = process.env.OWNER_NUMBER ? jidNormalizedUser(process.env.OWNER_NUMBER.split('@')[0]) : null;
 
-        // Only send notification if OWNER_NUMBER is set and valid
         if (!ownerJid) {
             logger.warn("OWNER_NUMBER not set or invalid in .env. Skipping connection notification.");
             return;
@@ -220,18 +515,15 @@ class WhatsAppBot {
         const sendStatusNotifStatus = getStatusEmoji('SEND_STATUS_VIEW_NOTIFICATION_ENABLED');
         const autoViewChannelsStatus = getStatusEmoji('AUTO_VIEW_CHANNELS_ENABLED');
         const autoTypingStatus = getStatusEmoji('AUTO_TYPING_INDICATOR_ENABLED');
-
-        // Check SPECIAL_CONTACT_ALERTS differently as it's a list
         const specialAlertsList = process.env.SPECIAL_CONTACT_ALERTS;
         const specialAlertsStatus = (specialAlertsList && specialAlertsList.split(',').filter(Boolean).length > 0) ? '✅' : '❌';
-
         const alwaysOnlineStatus = getStatusEmoji('ALWAYS_ONLINE');
         const botSignatureStatus = getStatusEmoji('BOT_SIGNATURE_ENABLED');
         const removeBgStatus = process.env.REMOVEBG_API_KEY && process.env.REMOVEBG_API_KEY !== 'YOUR_API_KEY' && process.env.REMOVEBG_API_KEY !== '' ? '✅' : '❌';
         const pythonApiStatus = process.env.PYTHON_API_URL && process.env.PYTHON_API_URL !== 'http://localhost:5000' && process.env.PYTHON_API_URL !== '' ? '✅' : '❌';
         const weatherApiStatus = process.env.WEATHER_API_KEY && process.env.WEATHER_API_KEY !== 'YOUR_WEATHER_API_KEY' && process.env.WEATHER_API_KEY !== '' ? '✅' : '❌';
-        const geminiApiStatus = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'YOUR_GEMINI_API_KEY' && process.env.GEMINI_API_KEY !== '' ? '✅' : '❌'; // New
-        const voiceRssApiStatus = process.env.VOICE_RSS_API_KEY && process.env.VOICE_RSS_API_KEY !== 'YOUR_VOICE_RSS_API_KEY' && process.env.VOICE_RSS_API_KEY !== '' ? '✅' : '❌'; // New
+        const geminiApiStatus = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'YOUR_GEMINI_API_KEY' && process.env.GEMINI_API_KEY !== '' ? '✅' : '❌';
+        const voiceRssApiStatus = process.env.VOICE_RSS_API_KEY && process.env.VOICE_RSS_API_KEY !== 'YOUR_VOICE_RSS_API_KEY' && process.env.VOICE_RSS_API_KEY !== '' ? '✅' : '❌';
 
         let commandCount = 'N/A';
         try {
@@ -248,6 +540,7 @@ class WhatsAppBot {
 ║ 👑 Owner: ${(ownerJid ? ownerJid.split('@')[0] : 'Not Set').padEnd(25)} ║
 ║ 🤖 Version: ${config.BOT_VERSION.padEnd(25)} ║
 ║ ⚡ Commands Loaded: ${String(commandCount).padEnd(16)} ║
+║ 👥 Active Sessions: ${String(this.activeSessions.size).padEnd(15)} ║
 ╠═══════════════════════════════════════════╣
 ║           *FEATURE STATUS* ║
 ╠═══════════════════════════════════════════╣
@@ -265,9 +558,8 @@ class WhatsAppBot {
 ║ ${geminiApiStatus} Gemini API: ${(geminiApiStatus === '✅' ? 'Active' : 'Inactive').padEnd(22)} ║
 ║ ${voiceRssApiStatus} VoiceRSS API: ${(voiceRssApiStatus === '✅' ? 'Active' : 'Inactive').padEnd(19)} ║
 ╚═══════════════════════════════════════════╝
-            `.trim();
+`.trim();
 
-        // Send to owner's JID
         await this.sock.sendMessage(ownerJid, { text: message });
         logger.info("✅ Sent bot connection notification to owner.");
     }
@@ -293,6 +585,11 @@ class WhatsAppBot {
             } catch (err) {
                 logger.error("❌ Cleanup error:", err);
             }
+        }
+        
+        if (this.telegramBot) {
+            this.telegramBot.stopPolling();
+            logger.info("✅ Telegram bot stopped.");
         }
     }
 }
